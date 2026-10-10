@@ -26,7 +26,7 @@ hub = [
   "webauthn>=2.2",
 ]
 agents = [
-  "anthropic>=0.69",
+  "anthropic>=1.13",
 ]
 youtube = [
   "google-api-python-client>=2.140",
@@ -64,7 +64,7 @@ packages = ["ytcore"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["googleapiclient.*", "google.oauth2.*", "anthropic.*"]
+module = ["googleapiclient.*", "google.oauth2.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

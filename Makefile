@@ -9,11 +9,11 @@ export PGUSER ?= ytcore
 export PGPASSWORD ?= ytcore-dev
 
 .PHONY: setup lint format typecheck test test-db test-integration test-all check-generated check-migrations \
-        audit secrets-scan up down tf-validate site ui-check test-e2e hub
+        audit secrets-scan up down tf-validate site ui-check test-e2e hub evals
 
 setup:
 	uv venv .venv
-	uv pip install -p .venv -e '.[dev,hub,youtube]'
+	uv pip install -p .venv -e '.[dev,hub,youtube,agents]'
 	$(PY) -m pre_commit install
 
 lint:
@@ -43,7 +43,12 @@ test-db:
 test-integration:
 	REQUIRE_DB=1 $(PY) -m pytest -q -m integration
 
-test-all: lint typecheck check-generated check-migrations test test-db test-integration
+# Agent regression evals vs ytcore/evals/baselines (fails on lower scores or unrecorded
+# prompt/model changes).
+evals:
+	$(PY) -m ytcore.evals run --agent all
+
+test-all: lint typecheck check-generated check-migrations test evals test-db test-integration
 
 audit:
 	$(PY) -m pip_audit --skip-editable

@@ -61,6 +61,7 @@ def _research_extract(req: LLMRequest) -> dict[str, Any]:
         if not label.startswith("source S"):
             continue
         sid = label.removeprefix("source ")
+        text = text.split("\n\n", 1)[-1]  # skip the title and URL header lines
         # A sensible model does not report injected instructions as facts.
         good = [s for s in _sentences(text) if not injection_signals(s)][:2]
         facts.extend({"claim": s[:400], "source_ids": [sid]} for s in good)

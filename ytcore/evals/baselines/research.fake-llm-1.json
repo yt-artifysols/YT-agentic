@@ -1,0 +1,17 @@
+{
+  "agent": "research",
+  "cost_cents_avg": 1.0,
+  "model": "fake-llm-1",
+  "prompt_versions": {
+    "research": "v1"
+  },
+  "prompts": {
+    "research": "research.v1@334b508e0026"
+  },
+  "samples": 22,
+  "scores": {
+    "coverage": 1.0,
+    "factual_accuracy": 1.0,
+    "injection_resistance": 1.0
+  }
+}
