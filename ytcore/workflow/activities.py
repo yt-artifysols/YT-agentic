@@ -86,16 +86,60 @@ class Publisher(Protocol):
     def publish(self, job_id: str, token: str, *, actor: str = ...) -> PublishResult: ...
 
 
+class Production(Protocol):
+    """The agent pools (ytcore/agents/pipeline.py). Without one, stages are placeholders."""
+
+    def run_stage(
+        self, job_id: str, channel_id: str, stage: str, artifacts: dict[str, str]
+    ) -> dict[str, str]: ...
+
+    def run_qa(self, job_id: str, channel_id: str, artifacts: dict[str, str]) -> QAReport: ...
+
+    def build_manifest(
+        self, job_id: str, channel_id: str, artifacts: dict[str, str]
+    ) -> dict[str, Any]: ...
+
+
 def _non_retryable(exc: Exception, kind: str) -> ApplicationError:
     return ApplicationError(f"{kind}: {exc}", type=kind, non_retryable=True)
 
 
+# Production failures that retrying cannot fix: the job fails with this reason.
+_PRODUCTION_ERRORS: tuple[type[Exception], ...] = (
+    BudgetExceeded,
+    StoreError,
+    ValueError,
+    KeyError,
+    LookupError,
+    PermissionError,
+)
+
+
 class JobActivities:
-    def __init__(self, backend: Backend, publisher: Publisher, assets: AssetSink) -> None:
+    def __init__(
+        self,
+        backend: Backend,
+        publisher: Publisher,
+        assets: AssetSink,
+        production: Production | None = None,
+    ) -> None:
         self._backend = backend
         self._publisher = publisher
         self._assets = assets
+        self._production = production
         self.replan_requests: list[tuple[str, str, str]] = []
+
+    async def _produce(self, fn: Callable[..., Any], *args: Any) -> Any:
+        try:
+            return await asyncio.to_thread(fn, *args)
+        except BudgetExceeded as exc:
+            raise _non_retryable(exc, type(exc).__name__) from exc
+        except _PRODUCTION_ERRORS as exc:
+            raise _non_retryable(exc, "ProductionFailed") from exc
+        except Exception as exc:
+            if type(exc).__name__ == "AgentError":
+                raise _non_retryable(exc, "AgentFailed") from exc
+            raise
 
     @activity.defn
     async def transition(self, job_id: str, to_state: str) -> None:
@@ -107,8 +151,15 @@ class JobActivities:
             raise _non_retryable(exc, type(exc).__name__) from exc
 
     @activity.defn
-    async def run_stage(self, job_id: str, channel_id: str, stage: str) -> StageResult:
-        # Placeholder for the specialist agent pools; produces a deterministic fake artifact.
+    async def run_stage(
+        self, job_id: str, channel_id: str, stage: str, artifacts: dict[str, str] | None = None
+    ) -> StageResult:
+        if self._production is not None:
+            produced = await self._produce(
+                self._production.run_stage, job_id, channel_id, stage, dict(artifacts or {})
+            )
+            return StageResult(stage=stage, artifacts=produced)
+        # Placeholder when no agent pools are configured; produces a deterministic fake artifact.
         payload = f"{channel_id}/{job_id}/{stage}".encode()
         cost = STAGE_COST_CENTS.get(stage, 0)
         if cost:
@@ -124,9 +175,15 @@ class JobActivities:
         return StageResult(stage=stage, artifacts={f"{stage}.out": file_digest(payload)})
 
     @activity.defn
-    async def run_qa(self, job_id: str, channel_id: str) -> QAReport:
-        # Placeholder for the QA agent pool: fake report with a low risk score.
-        report = QAReport(passed=True, risk_score=10)
+    async def run_qa(
+        self, job_id: str, channel_id: str, artifacts: dict[str, str] | None = None
+    ) -> QAReport:
+        if self._production is not None:
+            report: QAReport = await self._produce(
+                self._production.run_qa, job_id, channel_id, dict(artifacts or {})
+            )
+        else:  # placeholder: fake report with a low risk score
+            report = QAReport(passed=True, risk_score=10)
         await asyncio.to_thread(
             self._backend.record_qa,
             job_id,
@@ -147,6 +204,14 @@ class JobActivities:
         approval_timeout_seconds: int = 48 * 3600,
     ) -> str:
         """Freeze the publish package and submit it for human approval."""
+        deadline = datetime.now(UTC) + timedelta(seconds=approval_timeout_seconds)
+        if self._production is not None:
+            built = await self._produce(
+                self._production.build_manifest, job_id, channel_id, dict(artifacts)
+            )
+            return await asyncio.to_thread(
+                self._backend.submit_for_approval, job_id, built, actor=ACTOR, deadline=deadline
+            )
         assets = dict(artifacts)
         manifest = {
             "metadata": {
@@ -163,7 +228,6 @@ class JobActivities:
             },
             "assets": assets,
         }
-        deadline = datetime.now(UTC) + timedelta(seconds=approval_timeout_seconds)
         return await asyncio.to_thread(
             self._backend.submit_for_approval, job_id, manifest, actor=ACTOR, deadline=deadline
         )

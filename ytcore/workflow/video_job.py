@@ -88,7 +88,7 @@ class VideoJobWorkflow:
     async def _stage(self, inp: VideoJobInput, stage: str) -> dict[str, str]:
         res = await workflow.execute_activity_method(
             JobActivities.run_stage,
-            args=[inp.job_id, inp.channel_id, stage],
+            args=[inp.job_id, inp.channel_id, stage, dict(self._artifacts)],
             start_to_close_timeout=_TIMEOUT,
             retry_policy=_RETRY,
         )
@@ -119,7 +119,7 @@ class VideoJobWorkflow:
     async def _run_qa(self, inp: VideoJobInput) -> QAReport:
         return await workflow.execute_activity_method(
             JobActivities.run_qa,
-            args=[inp.job_id, inp.channel_id],
+            args=[inp.job_id, inp.channel_id, dict(self._artifacts)],
             start_to_close_timeout=_TIMEOUT,
             retry_policy=_RETRY,
         )

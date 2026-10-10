@@ -104,6 +104,7 @@ class PostgresInputs:
         submitted_by: str,
     ) -> OwnerInput:
         try:
+            kind = InputKind(kind)
             digest = validate_input(kind, body, uri, sha256)
         except ValueError as exc:
             raise InputRejected(str(exc)) from None
@@ -185,6 +186,7 @@ class InMemoryInputs:
         submitted_by: str,
     ) -> OwnerInput:
         try:
+            kind = InputKind(kind)
             digest = validate_input(kind, body, uri, sha256)
         except ValueError as exc:
             raise InputRejected(str(exc)) from None
