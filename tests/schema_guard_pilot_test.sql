@@ -87,7 +87,7 @@ SELECT pg_temp.expect_error(
                                approval_deadline, budget_cents)
       VALUES ('pl-a', '2026-05-04', 2, '00000000-0000-0000-0000-0000000000a2',
               '2026-05-05 18:00+00', '2026-05-05', '2026-05-05 17:00+00', 500)$$,
-    '23505', 'at most one live plan per channel per publish day');
+    '23505', 'at most one plan per channel per publish day');
 SELECT pg_temp.expect_error(
     $$INSERT INTO daily_plans (channel_id, plan_date, job_id, slot_at, slot_date,
                                approval_deadline, budget_cents)
@@ -107,12 +107,20 @@ SELECT pg_temp.expect_ok($$UPDATE daily_plans SET status = 'closed'$$, 'a plan c
 SELECT pg_temp.check(
     EXISTS (SELECT 1 FROM audit_events WHERE action = 'plan.closed'),
     'plan status changes are audited');
+SELECT pg_temp.expect_error(
+    $$INSERT INTO daily_plans (channel_id, plan_date, attempt, job_id, slot_at, slot_date,
+                               approval_deadline, budget_cents)
+      VALUES ('pl-a', '2026-05-04', 2, '00000000-0000-0000-0000-0000000000a2',
+              '2026-05-05 18:00+00', '2026-05-05', '2026-05-05 17:00+00', 500)$$,
+    '23505', 'a finished plan still occupies its day (no second video that day)');
+SELECT pg_temp.expect_ok($$UPDATE daily_plans SET status = 'replanned'$$,
+                         'a plan can be marked replaced');
 SELECT pg_temp.expect_ok(
     $$INSERT INTO daily_plans (channel_id, plan_date, attempt, job_id, slot_at, slot_date,
                                approval_deadline, budget_cents)
       VALUES ('pl-a', '2026-05-04', 2, '00000000-0000-0000-0000-0000000000a2',
               '2026-05-05 18:00+00', '2026-05-05', '2026-05-05 17:00+00', 500)$$,
-    'a closed plan frees its day for a replan');
+    'only a replaced plan frees its day for a replan');
 SELECT pg_temp.expect_error($$DELETE FROM daily_plans$$, '42501', 'plans cannot be deleted');
 SELECT pg_temp.expect_error($$TRUNCATE daily_plans$$, '42501', 'plans cannot be truncated');
 

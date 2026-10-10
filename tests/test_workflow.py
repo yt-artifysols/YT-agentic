@@ -317,3 +317,55 @@ async def test_forged_hub_decision_and_attacker_token_never_publish(
         result = await handle.result()
     assert result.final_state == JobState.CANCELLED.value
     assert h.client.uploads == []
+
+
+async def test_approval_arriving_before_the_workflow_notices_awaiting_state_is_not_lost(
+    env: WorkflowEnvironment,
+) -> None:
+    """The database reaches awaiting_approval inside seal_package, slightly before the workflow
+    knows. A decision sent in that gap used to be dropped and the job waited for nothing."""
+    h = Harness()
+    loop = asyncio.get_running_loop()
+    holder: dict[str, Any] = {}
+    original = h.backend.submit_for_approval
+
+    def submit_then_approve_immediately(job_id: str, manifest: Any, **kw: Any) -> str:
+        chash = original(job_id, manifest, **kw)
+        token = h.keys.token(job_id, "chan-a", chash)
+        decision = ApprovalDecision(True, "owner", token)
+        asyncio.run_coroutine_threadsafe(
+            holder["handle"].signal(VideoJobWorkflow.submit_approval, decision), loop
+        ).result(timeout=30)
+        return chash
+
+    h.backend.submit_for_approval = submit_then_approve_immediately  # type: ignore[method-assign]
+    async with h.worker(env):
+        job_id = h.backend.create_job("chan-a")
+        from ytcore.workflow.models import VideoJobInput
+
+        handle = await env.client.start_workflow(
+            VideoJobWorkflow.run,
+            VideoJobInput(job_id=job_id, channel_id="chan-a", origin="owner"),
+            id=f"job-{job_id}",
+            task_queue=TASK_QUEUE,
+        )
+        holder["handle"] = handle
+        result = await handle.result()
+    assert result.final_state == JobState.LIVE.value
+    assert len(h.client.uploads) == 1
+
+
+async def test_a_buffered_decision_for_stale_content_is_ignored(env: WorkflowEnvironment) -> None:
+    from ytcore.workflow.models import HubDecision
+
+    h = Harness()
+    async with h.worker(env):
+        handle, _ = await h.start(env, approval_timeout_seconds=3600)
+        await _await_state(handle, JobState.AWAITING_APPROVAL)
+        stale = "sha256:" + "2" * 64
+        await handle.signal(
+            VideoJobWorkflow.hub_decision, HubDecision("reject", "x", stale, None, "discard", "no")
+        )
+        result = await handle.result()
+    # The reject was about other content, so it did not end the job; the deadline did.
+    assert result.final_state == JobState.CANCELLED.value and result.replanned

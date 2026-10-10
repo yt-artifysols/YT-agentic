@@ -198,7 +198,7 @@ class PlanRepository:
                 return row[0], row[1], False
             taken = conn.execute(
                 "SELECT 1 FROM daily_plans WHERE channel_id = %s AND slot_date = %s "
-                "AND status IN ('active', 'replan_requested')",
+                "AND status IN ('active', 'replan_requested', 'closed')",
                 (s.channel_id, slot.slot_date),
             ).fetchone()
             if taken is not None:
@@ -223,7 +223,7 @@ class PlanRepository:
         with self._tx() as conn:
             row = conn.execute(
                 "SELECT 1 FROM daily_plans WHERE channel_id = %s AND slot_date = %s "
-                "AND status IN ('active', 'replan_requested')",
+                "AND status IN ('active', 'replan_requested', 'closed')",
                 (channel_id, slot_date),
             ).fetchone()
         return row is not None

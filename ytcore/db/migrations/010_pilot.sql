@@ -54,9 +54,11 @@ CREATE TABLE daily_plans (
     FOREIGN KEY (job_id, channel_id) REFERENCES video_jobs (id, channel_id),
     CHECK (approval_deadline <= slot_at)
 );
--- At most one live plan per channel per publish day.
-CREATE UNIQUE INDEX daily_plans_one_live_slot_per_day
-    ON daily_plans (channel_id, slot_date) WHERE status IN ('active', 'replan_requested');
+-- At most one plan per channel per publish day, whether its job is still in flight or already
+-- finished. Only a plan that was REPLACED (or exhausted) frees its day.
+CREATE UNIQUE INDEX daily_plans_one_plan_per_slot_day
+    ON daily_plans (channel_id, slot_date)
+    WHERE status IN ('active', 'replan_requested', 'closed');
 CREATE INDEX daily_plans_status_idx ON daily_plans (status, slot_at);
 
 CREATE FUNCTION daily_plans_guard() RETURNS trigger LANGUAGE plpgsql AS $$

@@ -57,15 +57,22 @@ class VideoJobWorkflow:
         self._chash = ""
         self.rejected_tokens = 0
 
+    def _accepts_decisions(self) -> bool:
+        # The database moves to awaiting_approval inside seal_package, a moment before this
+        # workflow learns about it (it is still in `qa` then). A decision that arrives in that gap
+        # is buffered, not dropped; it is only acted on once the workflow waits for approval, and
+        # a token is always verified against the CURRENT content hash.
+        return self._state in (JobState.QA, JobState.AWAITING_APPROVAL)
+
     @workflow.signal
     def submit_approval(self, decision: ApprovalDecision) -> None:
-        if self._state == JobState.AWAITING_APPROVAL and self._decision is None:
+        if self._accepts_decisions() and self._decision is None:
             self._decision = decision
 
     @workflow.signal
     def hub_decision(self, decision: HubDecision) -> None:
         """From the approval hub, which has already written the DB side of the decision."""
-        if self._state == JobState.AWAITING_APPROVAL and self._hub is None:
+        if self._accepts_decisions() and self._hub is None:
             self._hub = decision
 
     @workflow.signal
@@ -194,6 +201,8 @@ class VideoJobWorkflow:
 
             if self._hub is not None:
                 hub, self._hub = self._hub, None
+                if hub.action != "edit" and hub.content_hash and hub.content_hash != self._chash:
+                    continue  # a decision about content that is no longer current
                 if hub.action == "edit":
                     # The hub stored the edit as a new manifest version and moved the job to qa.
                     # Re-run QA on it; an edit never approves anything.
