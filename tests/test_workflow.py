@@ -11,9 +11,10 @@ from temporalio.client import WorkflowHandle
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
-from ytcore.approvals.tokens import ApprovalSigner, ApprovalVerifier
-from ytcore.gateway.youtube import FakeYouTubeClient, YouTubeGateway
-from ytcore.workflow.activities import InMemoryJobStore, JobActivities
+from tests.fakes import FakeYouTubeClient, InMemoryJobStore
+from ytcore.approvals.token import ApprovalSigner, ApprovalVerifier
+from ytcore.gateway.youtube import YouTubeGateway
+from ytcore.workflow.activities import JobActivities
 from ytcore.workflow.models import ApprovalDecision, VideoJobInput, VideoJobResult
 from ytcore.workflow.states import JobState
 from ytcore.workflow.video_job import VideoJobWorkflow

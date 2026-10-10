@@ -5,9 +5,10 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+from tests.fakes import FakeYouTubeClient
 from ytcore.approvals.hashing import content_hash, file_digest
-from ytcore.approvals.tokens import ApprovalError, ApprovalSigner, ApprovalVerifier
-from ytcore.gateway.youtube import FakeYouTubeClient, YouTubeGateway
+from ytcore.approvals.token import ApprovalError, ApprovalSigner, ApprovalVerifier
+from ytcore.gateway.youtube import YouTubeGateway
 
 HASH = content_hash({"metadata": {"title": "t"}, "assets": {"v.mp4": file_digest(b"video")}})
 NOW = datetime(2026, 1, 1, tzinfo=UTC)

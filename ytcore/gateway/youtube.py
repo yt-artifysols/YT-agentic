@@ -6,28 +6,15 @@ job, the channel and the exact content hash.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Protocol
 
-from ytcore.approvals.tokens import ApprovalClaims, ApprovalError, ApprovalVerifier
+from ytcore.approvals.token import ApprovalClaims, ApprovalError, ApprovalVerifier
 
 
 class YouTubeClient(Protocol):
     is_fake: bool
 
     def upload(self, *, channel_id: str, content_hash: str) -> str: ...
-
-
-@dataclass
-class FakeYouTubeClient:
-    """In-memory client for dev and tests. Production config refuses it."""
-
-    is_fake: bool = True
-    uploads: list[tuple[str, str]] = field(default_factory=list)
-
-    def upload(self, *, channel_id: str, content_hash: str) -> str:
-        self.uploads.append((channel_id, content_hash))
-        return f"fake-video-{len(self.uploads)}"
 
 
 class YouTubeGateway:

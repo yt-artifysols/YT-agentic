@@ -64,4 +64,4 @@ def test_migration_files_are_numbered_and_unique() -> None:
 
     names = [p.name for p in migration_files()]
     assert names == sorted(names)
-    assert names[:2] == ["001_core_schema.sql", "002_transitions_seed.sql"]
+    assert names[:2] == ["001_init.sql", "002_transitions_seed.sql"]
