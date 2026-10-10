@@ -91,6 +91,10 @@ CREATE TRIGGER daily_plans_no_truncate BEFORE TRUNCATE ON daily_plans
 
 -- ---------------------------------------------------------------- analytics
 
+-- Read-only analytics OAuth token, SEPARATE from the upload token the gateway alone can read.
+ALTER TABLE channels ADD COLUMN analytics_credentials_ref text
+    CHECK (analytics_credentials_ref ~ '^(vault|env)://[A-Za-z0-9_./-]+$');
+
 CREATE TABLE video_metrics (
     id                bigserial PRIMARY KEY,
     channel_id        text NOT NULL REFERENCES channels (id),
@@ -121,6 +125,16 @@ CREATE TRIGGER video_metrics_audit AFTER INSERT OR UPDATE ON video_metrics
     FOR EACH ROW EXECUTE FUNCTION video_metrics_audit();
 CREATE TRIGGER video_metrics_no_delete BEFORE DELETE ON video_metrics
     FOR EACH ROW EXECUTE FUNCTION forbid_mutation();
+
+-- One learning per video per ISO week, so re-running ingestion never repeats memory notes.
+CREATE TABLE performance_notes (
+    youtube_video_id text NOT NULL,
+    iso_week         text NOT NULL,
+    channel_id       text NOT NULL REFERENCES channels (id),
+    verdict          text NOT NULL CHECK (verdict IN ('above', 'below', 'typical')),
+    created_at       timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (youtube_video_id, iso_week)
+);
 
 CREATE TABLE daily_scorecards (
     channel_id        text NOT NULL REFERENCES channels (id),
