@@ -33,6 +33,8 @@ SecretsBackend = Literal["env_file", "in_memory", "cloud"]
 YouTubeBackend = Literal["fake", "real"]
 StorageBackend = Literal["memory", "local", "object_store"]
 LLMBackend = Literal["fake", "anthropic"]
+MediaBackend = Literal["fake"]  # real TTS / image / video / stock adapters: not chosen yet
+WebBackend = Literal["fake", "http"]
 QueueBackend = Literal["in_memory", "temporal"]
 
 # Values that are fakes or dev-only conveniences. Production refuses every one of them.
@@ -41,6 +43,7 @@ FAKE_VALUES: dict[str, frozenset[str]] = {
     "youtube_backend": frozenset({"fake"}),
     "storage_backend": frozenset({"memory", "local"}),
     "llm_backend": frozenset({"fake"}),
+    "web_backend": frozenset({"fake"}),
     "queue_backend": frozenset({"in_memory"}),
 }
 
@@ -68,6 +71,13 @@ class Settings(BaseSettings):
     youtube_backend: YouTubeBackend = "fake"
     storage_backend: StorageBackend = "memory"
     llm_backend: LLMBackend = "fake"
+    llm_model: str = "claude-opus-5-5"
+    llm_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
+    llm_api_key_ref: str = "env://ANTHROPIC_API_KEY"
+    llm_input_cents_per_mtok: int = Field(default=400, gt=0)
+    llm_output_cents_per_mtok: int = Field(default=2000, gt=0)
+    media_backend: MediaBackend = "fake"
+    web_backend: WebBackend = "fake"
     queue_backend: QueueBackend = "in_memory"
 
     temporal_address: str = "localhost:7233"
@@ -81,7 +91,7 @@ class Settings(BaseSettings):
     youtube_upload_quota_units: int = Field(default=1600, gt=0)
     youtube_status_quota_units: int = Field(default=1, gt=0)
 
-    @field_validator("database_url_ref", "approval_public_key_ref")
+    @field_validator("database_url_ref", "approval_public_key_ref", "llm_api_key_ref")
     @classmethod
     def _must_be_ref(cls, value: str) -> str:
         try:
@@ -100,11 +110,16 @@ class Settings(BaseSettings):
             ]
             if bad:
                 raise ConfigError(f"production refuses fake/dev-only providers: {', '.join(bad)}")
-            for name in ("database_url_ref", "approval_public_key_ref"):
+            for name in ("database_url_ref", "approval_public_key_ref", "llm_api_key_ref"):
                 if not getattr(self, name).startswith("vault://"):
                     raise ConfigError(f"production requires vault:// references for {name}")
             if not self.temporal_namespace.endswith("prod"):
                 raise ConfigError("production temporal_namespace must end with 'prod'")
+            if self.media_backend == "fake":
+                raise ConfigError(
+                    "production refuses fake media providers; real TTS/image/video/stock "
+                    "adapters are not configured yet"
+                )
         elif self.env is Environment.STAGING:
             if self.secrets_backend in FAKE_VALUES["secrets_backend"]:
                 raise ConfigError("staging must use the cloud secrets manager")

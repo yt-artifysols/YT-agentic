@@ -17,6 +17,8 @@ PROD_OK = {
     "temporal_namespace": "ytcore-prod",
     "database_url_ref": "vault://platform/db#url",
     "approval_public_key_ref": "vault://approvals/public#key",
+    "llm_api_key_ref": "vault://providers/anthropic#api_key",
+    "web_backend": "http",
 }
 
 
@@ -34,8 +36,10 @@ def test_defaults_are_dev_with_fakes() -> None:
 
 
 def test_valid_production_settings() -> None:
-    s = Settings(**PROD_OK)
-    assert s.env is Environment.PRODUCTION
+    # Production stays blocked until real media providers exist (only fakes so far).
+    with pytest.raises(ValidationError, match="fake media providers"):
+        Settings(**PROD_OK)
+    s = Settings.model_construct(**{**PROD_OK, "env": Environment.PRODUCTION})
     assert isinstance(build_secrets_provider(s), CloudSecretsManagerProvider)
 
 
@@ -48,6 +52,7 @@ def test_valid_production_settings() -> None:
         ("storage_backend", "memory"),
         ("storage_backend", "local"),
         ("llm_backend", "fake"),
+        ("web_backend", "fake"),
         ("queue_backend", "in_memory"),
     ],
 )
