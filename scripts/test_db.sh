@@ -17,4 +17,6 @@ psql -X -q -v ON_ERROR_STOP=1 -d "$ADMIN_DB" -c "CREATE DATABASE $DB"
 unset DATABASE_URL
 PGDATABASE="$DB" "$PY" -m ytcore.db.migrate
 PGDATABASE="$DB" "$PY" -m ytcore.db.migrate >/dev/null
-PGDATABASE="$DB" psql -X -v ON_ERROR_STOP=1 -f tests/schema_guard_test.sql
+for t in tests/schema_guard*_test.sql; do
+    PGDATABASE="$DB" psql -X -v ON_ERROR_STOP=1 -f "$t"
+done

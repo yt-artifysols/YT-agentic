@@ -80,7 +80,7 @@ SELECT pg_temp.expect_error(
       WHERE id = '00000000-0000-0000-0000-00000000000a'$$,
     '23514', 'awaiting_approval requires content hash');
 SELECT pg_temp.expect_ok($$UPDATE video_jobs SET state = 'awaiting_approval',
-    content_hash = 'sha256:' || repeat('a', 64)
+    content_hash = 'sha256:' || repeat('a', 64), manifest = '{"metadata": {}, "assets": {}}'
     WHERE id = '00000000-0000-0000-0000-00000000000a'$$, 'qa -> awaiting_approval');
 SELECT pg_temp.expect_error(
     $$UPDATE video_jobs SET content_hash = 'sha256:' || repeat('b', 64)
@@ -92,24 +92,24 @@ SELECT pg_temp.expect_error(
     $$UPDATE video_jobs SET state = 'approved' WHERE id = '00000000-0000-0000-0000-00000000000a'$$,
     '42501', 'approved requires an approval row');
 SELECT pg_temp.expect_error(
-    $$INSERT INTO approvals (job_id, channel_id, content_hash, token_id, approver, expires_at)
+    $$INSERT INTO approvals (job_id, channel_id, content_hash, token_jti, approver, expires_at)
       VALUES ('00000000-0000-0000-0000-00000000000a', 'chan-a', 'sha256:' || repeat('b', 64),
               'tok-wrong-hash', 'owner@example.test', now() + interval '1 hour')$$,
     '23514', 'approval must match job content hash');
 SELECT pg_temp.expect_error(
-    $$INSERT INTO approvals (job_id, channel_id, content_hash, token_id, approver, expires_at)
+    $$INSERT INTO approvals (job_id, channel_id, content_hash, token_jti, approver, expires_at)
       VALUES ('00000000-0000-0000-0000-00000000000a', 'chan-b', 'sha256:' || repeat('a', 64),
               'tok-wrong-channel', 'owner@example.test', now() + interval '1 hour')$$,
     '23503', 'approval must be bound to the job channel');
 SELECT pg_temp.expect_error(
-    $$INSERT INTO approvals (job_id, channel_id, content_hash, token_id, approver, expires_at)
+    $$INSERT INTO approvals (job_id, channel_id, content_hash, token_jti, approver, expires_at)
       VALUES ('00000000-0000-0000-0000-00000000000b', 'chan-b', 'sha256:' || repeat('a', 64),
               'tok-not-awaiting', 'owner@example.test', now() + interval '1 hour')$$,
     '23514', 'approval only for jobs awaiting approval');
 
 -- An expired approval does not open the gate.
 SELECT pg_temp.expect_ok(
-    $$INSERT INTO approvals (job_id, channel_id, content_hash, token_id, approver,
+    $$INSERT INTO approvals (job_id, channel_id, content_hash, token_jti, approver,
                              issued_at, expires_at)
       VALUES ('00000000-0000-0000-0000-00000000000a', 'chan-a', 'sha256:' || repeat('a', 64),
               'tok-expired', 'owner@example.test', now() - interval '2 hours',
@@ -120,38 +120,41 @@ SELECT pg_temp.expect_error(
 
 -- A revoked approval does not open the gate.
 SELECT pg_temp.expect_ok(
-    $$INSERT INTO approvals (job_id, channel_id, content_hash, token_id, approver, expires_at)
+    $$INSERT INTO approvals (job_id, channel_id, content_hash, token_jti, approver, expires_at)
       VALUES ('00000000-0000-0000-0000-00000000000a', 'chan-a', 'sha256:' || repeat('a', 64),
               'tok-revoked', 'owner@example.test', now() + interval '1 hour')$$,
     'record approval to revoke');
-SELECT pg_temp.expect_ok($$UPDATE approvals SET revoked_at = now() WHERE token_id = 'tok-revoked'$$,
+SELECT pg_temp.expect_ok($$UPDATE approvals SET revoked_at = now() WHERE token_jti = 'tok-revoked'$$,
     'revoke approval');
 SELECT pg_temp.expect_error(
-    $$UPDATE approvals SET revoked_at = NULL WHERE token_id = 'tok-revoked'$$,
+    $$UPDATE approvals SET revoked_at = NULL WHERE token_jti = 'tok-revoked'$$,
     '42501', 'revocation cannot be undone');
 SELECT pg_temp.expect_error(
     $$UPDATE video_jobs SET state = 'approved' WHERE id = '00000000-0000-0000-0000-00000000000a'$$,
     '42501', 'revoked approval does not open the gate');
 
 SELECT pg_temp.expect_ok(
-    $$INSERT INTO approvals (job_id, channel_id, content_hash, token_id, approver, expires_at)
+    $$INSERT INTO approvals (job_id, channel_id, content_hash, token_jti, approver, expires_at)
       VALUES ('00000000-0000-0000-0000-00000000000a', 'chan-a', 'sha256:' || repeat('a', 64),
               'tok-valid', 'owner@example.test', now() + interval '1 hour')$$,
     'record valid approval');
 SELECT pg_temp.expect_error(
-    $$UPDATE approvals SET content_hash = 'sha256:' || repeat('c', 64) WHERE token_id = 'tok-valid'$$,
+    $$UPDATE approvals SET content_hash = 'sha256:' || repeat('c', 64) WHERE token_jti = 'tok-valid'$$,
     '42501', 'approval content hash is immutable');
 SELECT pg_temp.expect_error(
-    $$DELETE FROM approvals WHERE token_id = 'tok-valid'$$, '42501', 'approvals cannot be deleted');
+    $$DELETE FROM approvals WHERE token_jti = 'tok-valid'$$, '42501', 'approvals cannot be deleted');
 SELECT pg_temp.expect_ok($$UPDATE video_jobs SET state = 'approved'
     WHERE id = '00000000-0000-0000-0000-00000000000a'$$, 'awaiting_approval -> approved');
-SELECT pg_temp.expect_ok($$UPDATE video_jobs SET state = 'publishing'
-    WHERE id = '00000000-0000-0000-0000-00000000000a'$$, 'approved -> publishing');
 SELECT pg_temp.expect_error(
-    $$UPDATE video_jobs SET state = 'cancelled' WHERE id = '00000000-0000-0000-0000-00000000000a'$$,
-    '23514', 'publishing cannot be cancelled');
-SELECT pg_temp.expect_ok($$UPDATE video_jobs SET state = 'published'
-    WHERE id = '00000000-0000-0000-0000-00000000000a'$$, 'publishing -> published');
+    $$UPDATE video_jobs SET state = 'publishing' WHERE id = '00000000-0000-0000-0000-00000000000a'$$,
+    '23514', 'approved cannot skip scheduling');
+SELECT pg_temp.expect_error(
+    $$UPDATE video_jobs SET manifest = '{"metadata": {"x": 1}, "assets": {}}'
+      WHERE id = '00000000-0000-0000-0000-00000000000a'$$,
+    '23514', 'manifest frozen after approval');
+-- Publish-side rules (scheduled, publishing, uploads) are covered in schema_guard_publish_test.sql.
+SELECT pg_temp.expect_ok($$UPDATE video_jobs SET state = 'cancelled'
+    WHERE id = '00000000-0000-0000-0000-00000000000a'$$, 'approved -> cancelled');
 SELECT pg_temp.expect_error(
     $$UPDATE video_jobs SET state = 'planned' WHERE id = '00000000-0000-0000-0000-00000000000a'$$,
     '23514', 'terminal state is final');
@@ -160,7 +163,7 @@ SELECT pg_temp.expect_error(
 DO $$
 BEGIN
     IF (SELECT count(*) FROM job_events
-        WHERE job_id = '00000000-0000-0000-0000-00000000000a') <> 9 THEN
+        WHERE job_id = '00000000-0000-0000-0000-00000000000a') <> 8 THEN
         RAISE EXCEPTION 'FAIL every transition is recorded in job_events';
     END IF;
     RAISE NOTICE 'ok   every transition is recorded in job_events';
