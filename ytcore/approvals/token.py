@@ -30,7 +30,7 @@ class ApprovalError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class ApprovalClaims:
-    token_id: str
+    jti: str  # unique token id; consumed once in the approvals table
     job_id: str
     channel_id: str
     content_hash: str
@@ -41,7 +41,7 @@ class ApprovalClaims:
     def to_json(self) -> dict[str, object]:
         return {
             "v": TOKEN_VERSION,
-            "tid": self.token_id,
+            "jti": self.jti,
             "job": self.job_id,
             "chan": self.channel_id,
             "hash": self.content_hash,
@@ -59,7 +59,7 @@ class ApprovalClaims:
             if not isinstance(iat, int) or not isinstance(exp, int):
                 raise ApprovalError("malformed timestamps")
             return cls(
-                token_id=str(raw["tid"]),
+                jti=str(raw["jti"]),
                 job_id=str(raw["job"]),
                 channel_id=str(raw["chan"]),
                 content_hash=str(raw["hash"]),
@@ -109,7 +109,7 @@ class ApprovalSigner:
             raise ApprovalError(f"ttl must be within (0, {MAX_TTL}]")
         issued = (now or datetime.now(UTC)).replace(microsecond=0)
         claims = ApprovalClaims(
-            token_id=secrets.token_urlsafe(16),
+            jti=secrets.token_urlsafe(16),
             job_id=job_id,
             channel_id=channel_id,
             content_hash=content_hash,

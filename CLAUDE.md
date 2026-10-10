@@ -18,10 +18,21 @@ render and QA; a HUMAN approval is mandatory before anything is published.
 - Agents only submit knowledge drafts; humans approve.
 - Nothing auto-publishes. Missed approval deadline => cancel and re-plan.
 
+## Layout
+- `ytcore/workflow` – states (source of truth), `VideoJobWorkflow`, activities (`Backend` protocol)
+- `ytcore/store/postgres.py` – psycopg 3 store; DB triggers enforce rules, errors become typed
+  exceptions (`ytcore/store/errors.py`); every write sets `app.actor` for events/audit
+- `ytcore/gateway` – `PublishService` (only publish path, public key only), `FakeYouTubeClient`
+  (default) and `RealYouTubeClient` (`youtube` extra; production only)
+- `ytcore/db/migrations` – numbered, immutable; `002_transitions_seed.sql` is generated and
+  repeatable (`-- repeatable`)
+- `tests/fakes.py` – `FakeBackend` mirroring DB rules; `tests/integration` – real Postgres
+
 ## Commands
 - `make setup` – venv + dev deps + pre-commit hooks
 - `make lint typecheck test` – ruff, mypy (strict), pytest (unit + Temporal time-skipping)
 - `make up` then `make test-db` – migrations + `tests/schema_guard_test.sql` on real Postgres
+- `make test-integration` – pipeline + gateway against real Postgres (`REQUIRE_DB=1`)
 - `make test-all` – everything CI runs (except secret scan, audit, terraform)
 - `make tf-validate` – Terraform validation
 

@@ -77,6 +77,10 @@ class Settings(BaseSettings):
 
     max_channels: int = Field(default=20, ge=1, le=20)
 
+    # YouTube Data API quota costs per call (units), charged to the channel's Google project.
+    youtube_upload_quota_units: int = Field(default=1600, gt=0)
+    youtube_status_quota_units: int = Field(default=1, gt=0)
+
     @field_validator("database_url_ref", "approval_public_key_ref")
     @classmethod
     def _must_be_ref(cls, value: str) -> str:

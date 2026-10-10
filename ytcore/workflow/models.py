@@ -35,11 +35,10 @@ class QAReport:
 
 
 @dataclass(frozen=True)
-class PublishRequest:
-    job_id: str
-    channel_id: str
-    content_hash: str
-    token: str
+class PublishOutcome:
+    video_id: str
+    state: str  # published | live
+    duplicate: bool = False
 
 
 @dataclass(frozen=True)
@@ -49,3 +48,4 @@ class VideoJobResult:
     content_hash: str | None = None
     video_id: str | None = None
     replanned: bool = False
+    reason: str = ""

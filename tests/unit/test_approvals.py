@@ -5,10 +5,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from tests.fakes import FakeYouTubeClient
 from ytcore.approvals.hashing import content_hash, file_digest
 from ytcore.approvals.token import ApprovalError, ApprovalSigner, ApprovalVerifier
-from ytcore.gateway.youtube import YouTubeGateway
 
 HASH = content_hash({"metadata": {"title": "t"}, "assets": {"v.mp4": file_digest(b"video")}})
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
@@ -95,34 +93,3 @@ def test_tampered_claims_rejected(signer: ApprovalSigner) -> None:
 def test_ttl_bounds(signer: ApprovalSigner, ttl: timedelta) -> None:
     with pytest.raises(ApprovalError):
         _issue(signer, ttl=ttl)
-
-
-def test_gateway_publishes_only_with_valid_single_use_token(signer: ApprovalSigner) -> None:
-    client = FakeYouTubeClient()
-    gw = YouTubeGateway(ApprovalVerifier(signer.public_key()), client)
-    token, _ = signer.issue(
-        job_id="job-1",
-        channel_id="chan-a",
-        content_hash=HASH,
-        approver="o",
-        ttl=timedelta(hours=1),
-    )
-    with pytest.raises(ApprovalError):
-        gw.publish(job_id="job-1", channel_id="chan-a", content_hash=HASH, token="x.y")
-    assert client.uploads == []
-    gw.publish(job_id="job-1", channel_id="chan-a", content_hash=HASH, token=token)
-    with pytest.raises(ApprovalError, match="already used"):
-        gw.publish(job_id="job-1", channel_id="chan-a", content_hash=HASH, token=token)
-    assert len(client.uploads) == 1
-
-
-def test_gateway_refuses_fake_client_in_production(signer: ApprovalSigner) -> None:
-    with pytest.raises(RuntimeError):
-        YouTubeGateway(ApprovalVerifier(signer.public_key()), FakeYouTubeClient(), env="production")
-
-
-def test_gateway_has_no_signing_capability() -> None:
-    import ytcore.gateway.youtube as gw_module
-
-    assert "ApprovalSigner" not in vars(gw_module)
-    assert "Ed25519PrivateKey" not in vars(gw_module)

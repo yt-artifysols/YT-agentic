@@ -8,12 +8,12 @@ export PGPORT ?= 5432
 export PGUSER ?= ytcore
 export PGPASSWORD ?= ytcore-dev
 
-.PHONY: setup lint format typecheck test test-db test-all check-generated check-migrations \
+.PHONY: setup lint format typecheck test test-db test-integration test-all check-generated check-migrations \
         audit secrets-scan up down tf-validate
 
 setup:
 	uv venv .venv
-	uv pip install -p .venv -e '.[dev]'
+	uv pip install -p .venv -e '.[dev,youtube]'
 	$(PY) -m pre_commit install
 
 lint:
@@ -39,7 +39,11 @@ test:
 test-db:
 	PYTHON=$(PY) scripts/test_db.sh
 
-test-all: lint typecheck check-generated check-migrations test test-db
+# Pipeline + gateway against a real Postgres (throwaway database per run).
+test-integration:
+	REQUIRE_DB=1 $(PY) -m pytest -q -m integration
+
+test-all: lint typecheck check-generated check-migrations test test-db test-integration
 
 audit:
 	$(PY) -m pip_audit --skip-editable
