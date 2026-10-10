@@ -53,7 +53,18 @@ _FORWARD: dict[JobState, frozenset[JobState]] = {
     JobState.RENDERING: frozenset({JobState.QA}),
     # QA can send work back for rework.
     JobState.QA: frozenset({JobState.AWAITING_APPROVAL, JobState.SCRIPTING, JobState.RENDERING}),
-    JobState.AWAITING_APPROVAL: frozenset({JobState.APPROVED, JobState.REJECTED}),
+    # From the approval hub: approve, discard (rejected), edit (re-run QA on the edited
+    # manifest) or reject for rework at an earlier stage. Editing never approves.
+    JobState.AWAITING_APPROVAL: frozenset(
+        {
+            JobState.APPROVED,
+            JobState.REJECTED,
+            JobState.QA,
+            JobState.RESEARCHING,
+            JobState.SCRIPTING,
+            JobState.RENDERING,
+        }
+    ),
     JobState.APPROVED: frozenset({JobState.SCHEDULED}),
     JobState.SCHEDULED: frozenset({JobState.PUBLISHING}),
     # Publishing can only fail; it is never cancelled mid-upload.
