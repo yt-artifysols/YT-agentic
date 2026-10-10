@@ -1,0 +1,38 @@
+# Install with `make setup` (runs `pre-commit install`).
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: detect-private-key
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  - repo: local
+    hooks:
+      - id: migrations-immutable
+        name: applied migrations are immutable (vs origin/main)
+        entry: python scripts/check_migrations_immutable.py --base origin/main
+        language: system
+        pass_filenames: false
+        files: ^ytcore/db/migrations/
+      - id: transitions-seed-up-to-date
+        name: 002_transitions_seed.sql matches states.py
+        entry: python ytcore/tools/gen_transitions_sql.py --check
+        language: system
+        pass_filenames: false
+        files: ^(ytcore/workflow/states\.py|ytcore/db/migrations/002_transitions_seed\.sql|ytcore/tools/gen_transitions_sql\.py)$

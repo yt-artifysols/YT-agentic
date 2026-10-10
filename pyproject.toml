@@ -37,7 +37,7 @@ select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF"]
 ignore = ["S101"]  # assert is fine in tests and guards
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S105", "S106"]
+"tests/**" = ["S105", "S106", "S603", "S607"]
 
 [tool.mypy]
 python_version = "3.12"
