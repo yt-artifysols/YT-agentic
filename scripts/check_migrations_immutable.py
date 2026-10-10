@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 MIGRATIONS = "ytcore/db/migrations"
+REPEATABLE = b"-- repeatable\n"
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -43,6 +44,11 @@ def main(argv: list[str] | None = None) -> int:
         if not local.exists():
             problems.append(f"deleted: {name}")
         elif local.read_bytes() != base_blob:
+            # Generated repeatable migrations may change, but only if they were repeatable on
+            # the base branch too (the marker cannot be added later to unlock an old file).
+            local_bytes = local.read_bytes()
+            if base_blob.startswith(REPEATABLE) and local_bytes.startswith(REPEATABLE):
+                continue
             problems.append(f"modified: {name}")
     if problems:
         print("Applied migrations are immutable; add a new numbered migration instead:")

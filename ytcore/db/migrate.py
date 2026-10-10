@@ -1,8 +1,11 @@
 """Apply numbered SQL migrations with psql, recording a checksum per file.
 
 A migration whose checksum differs from the recorded one aborts the run: applied migrations
-are immutable. The connection comes from the standard libpq environment (PGHOST, PGUSER,
-PGDATABASE, ...) or DATABASE_URL; no credentials are accepted on the command line.
+are immutable. The exception is a migration whose first line is `-- repeatable` (the generated
+transitions seed), which is idempotent and re-applied when it changes.
+
+The connection comes from the standard libpq environment (PGHOST, PGUSER, PGDATABASE, ...) or
+DATABASE_URL; no credentials are accepted on the command line.
 """
 
 from __future__ import annotations
@@ -28,6 +31,14 @@ def migration_files(directory: Path = MIGRATIONS_DIR) -> list[Path]:
     if len(set(numbers)) != len(numbers):
         raise SystemExit("duplicate migration numbers")
     return files
+
+
+REPEATABLE_MARKER = b"-- repeatable\n"
+
+
+def is_repeatable(path: Path) -> bool:
+    """Repeatable migrations (generated seeds) are re-applied when their checksum changes."""
+    return path.read_bytes().startswith(REPEATABLE_MARKER)
 
 
 def checksum(path: Path) -> str:
@@ -63,9 +74,19 @@ def main() -> int:
     for path in migration_files():
         digest = checksum(path)
         if path.name in applied:
-            if applied[path.name] != digest:
+            if applied[path.name] == digest:
+                continue
+            if not is_repeatable(path):
                 print(f"applied migration {path.name} was modified", file=sys.stderr)
                 return 1
+            _psql("-f", str(path))
+            _psql(
+                "-c",
+                # Safe: name is validated by _NAME and digest is hex.
+                f"UPDATE schema_migrations SET sha256 = '{digest}', applied_at = now() "  # noqa: S608
+                f"WHERE name = '{path.name}'",
+            )
+            print(f"re-applied repeatable {path.name}")
             continue
         _psql("-f", str(path))
         _psql(

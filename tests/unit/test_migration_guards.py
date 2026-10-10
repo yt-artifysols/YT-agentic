@@ -55,6 +55,20 @@ def test_deleted_applied_migration_fails(repo: Path) -> None:
     assert _load_checker().main(["--base", "main", "--root", str(repo)]) == 1
 
 
+def test_repeatable_migration_may_change(repo: Path) -> None:
+    path = repo / "ytcore/db/migrations/002_seed.sql"
+    path.write_text("-- repeatable\nSELECT 1;\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "seed")
+    path.write_text("-- repeatable\nSELECT 2;\n")
+    assert _load_checker().main(["--base", "main", "--root", str(repo)]) == 0
+
+
+def test_marker_cannot_unlock_an_applied_migration(repo: Path) -> None:
+    (repo / "ytcore/db/migrations/001_init.sql").write_text("-- repeatable\nDROP TABLE a;\n")
+    assert _load_checker().main(["--base", "main", "--root", str(repo)]) == 1
+
+
 def test_missing_base_is_skipped(repo: Path) -> None:
     assert _load_checker().main(["--base", "origin/nope", "--root", str(repo)]) == 0
 
@@ -65,3 +79,9 @@ def test_migration_files_are_numbered_and_unique() -> None:
     names = [p.name for p in migration_files()]
     assert names == sorted(names)
     assert names[:2] == ["001_init.sql", "002_transitions_seed.sql"]
+
+
+def test_only_the_generated_seed_is_repeatable() -> None:
+    from ytcore.db.migrate import is_repeatable, migration_files
+
+    assert [p.name for p in migration_files() if is_repeatable(p)] == ["002_transitions_seed.sql"]

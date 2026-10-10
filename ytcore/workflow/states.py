@@ -1,7 +1,9 @@
 """Single source of truth for video job states and allowed transitions.
 
 After changing this file run `python ytcore/tools/gen_transitions_sql.py` to regenerate
-ytcore/db/migrations/002_transitions_seed.sql. CI fails if the two drift apart.
+ytcore/db/migrations/002_transitions_seed.sql. CI fails if the two drift apart. That file is a
+REPEATABLE migration: the runner re-applies it whenever its checksum changes, and it syncs the
+tables (upsert states, delete removed transitions) instead of only inserting.
 """
 
 from __future__ import annotations
@@ -17,15 +19,17 @@ class JobState(StrEnum):
     QA = "qa"
     AWAITING_APPROVAL = "awaiting_approval"
     APPROVED = "approved"
+    SCHEDULED = "scheduled"
     PUBLISHING = "publishing"
-    PUBLISHED = "published"
+    PUBLISHED = "published"  # uploaded, not yet verified live
+    LIVE = "live"  # live status verified after upload
     REJECTED = "rejected"
     CANCELLED = "cancelled"
     FAILED = "failed"
 
 
 TERMINAL_STATES: frozenset[JobState] = frozenset(
-    {JobState.PUBLISHED, JobState.REJECTED, JobState.CANCELLED, JobState.FAILED}
+    {JobState.LIVE, JobState.REJECTED, JobState.CANCELLED, JobState.FAILED}
 )
 
 # States from which a job may be cancelled (kill switch, missed approval deadline) or fail.
@@ -38,6 +42,7 @@ _ABORTABLE: frozenset[JobState] = frozenset(
         JobState.QA,
         JobState.AWAITING_APPROVAL,
         JobState.APPROVED,
+        JobState.SCHEDULED,
     }
 )
 
@@ -49,9 +54,12 @@ _FORWARD: dict[JobState, frozenset[JobState]] = {
     # QA can send work back for rework.
     JobState.QA: frozenset({JobState.AWAITING_APPROVAL, JobState.SCRIPTING, JobState.RENDERING}),
     JobState.AWAITING_APPROVAL: frozenset({JobState.APPROVED, JobState.REJECTED}),
-    JobState.APPROVED: frozenset({JobState.PUBLISHING}),
+    JobState.APPROVED: frozenset({JobState.SCHEDULED}),
+    JobState.SCHEDULED: frozenset({JobState.PUBLISHING}),
     # Publishing can only fail; it is never cancelled mid-upload.
     JobState.PUBLISHING: frozenset({JobState.PUBLISHED, JobState.FAILED}),
+    # Uploaded; becomes live once YouTube reports it processed, or fails if rejected.
+    JobState.PUBLISHED: frozenset({JobState.LIVE, JobState.FAILED}),
 }
 
 
@@ -68,7 +76,9 @@ def _build() -> dict[JobState, frozenset[JobState]]:
 TRANSITIONS: dict[JobState, frozenset[JobState]] = _build()
 
 # Entering any of these states requires a valid approval bound to the job's content hash.
-APPROVAL_GATED_STATES: frozenset[JobState] = frozenset({JobState.APPROVED, JobState.PUBLISHING})
+APPROVAL_GATED_STATES: frozenset[JobState] = frozenset(
+    {JobState.APPROVED, JobState.SCHEDULED, JobState.PUBLISHING}
+)
 
 
 def can_transition(src: JobState, dst: JobState) -> bool:
