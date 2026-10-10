@@ -20,6 +20,7 @@ from ytcore.approvals.service.notify import Notification, Notifier
 from ytcore.approvals.service.repo import HubConflict, HubRepository, User
 from ytcore.approvals.service.signals import WorkflowSignaler
 from ytcore.approvals.token import ApprovalClaims, ApprovalSigner
+from ytcore.observability.tracing import job_span
 from ytcore.store.errors import (
     ApprovalGateError,
     ApprovalInvalid,
@@ -115,6 +116,10 @@ class ApprovalHub:
             ) from exc
 
     async def approve(self, job_id: str, expected_hash: str, user: User) -> ApproveResult:
+        with job_span("hub.approve", job_id):
+            return await self._approve(job_id, expected_hash, user)
+
+    async def _approve(self, job_id: str, expected_hash: str, user: User) -> ApproveResult:
         head = await asyncio.to_thread(self._repo.head, job_id)
         if head is None:
             raise HubNotFound("job not found")

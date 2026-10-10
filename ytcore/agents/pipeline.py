@@ -41,6 +41,7 @@ from ytcore.agents.tools import Tool, ToolBox
 from ytcore.approvals.hashing import file_digest
 from ytcore.gateway.assets import read_verified
 from ytcore.inputs.store import InputStore
+from ytcore.observability.tracing import job_span
 from ytcore.planner.brief import BriefGenerator
 from ytcore.safety.assets import AssetLimits, check_asset
 from ytcore.safety.duplicates import FingerprintIndex, InMemoryFingerprintIndex
@@ -199,6 +200,12 @@ class AgentPipeline:
     def run_stage(
         self, job_id: str, channel_id: str, stage: str, artifacts: dict[str, str]
     ) -> dict[str, str]:
+        with job_span(f"agent.{stage}", job_id, channel_id, stage=stage):
+            return self._run_stage(job_id, channel_id, stage, artifacts)
+
+    def _run_stage(
+        self, job_id: str, channel_id: str, stage: str, artifacts: dict[str, str]
+    ) -> dict[str, str]:
         if stage == "research":
             ctx = self._loader.load(job_id, channel_id, pin_latest=True)
             brief = self._briefs.generate(job_id, channel_id, ctx.knowledge, origin="planner")
@@ -226,6 +233,13 @@ class AgentPipeline:
         raise ValueError(f"unknown stage {stage!r}")
 
     def run_qa(self, job_id: str, channel_id: str, artifacts: dict[str, str]) -> QAReport:
+        with job_span("agent.qa", job_id, channel_id, stage="qa") as span:
+            report = self._run_qa(job_id, channel_id, artifacts)
+            span.set_attribute("qa.passed", report.passed)
+            span.set_attribute("qa.risk_score", report.risk_score)
+            return report
+
+    def _run_qa(self, job_id: str, channel_id: str, artifacts: dict[str, str]) -> QAReport:
         ctx = self._loader.load(job_id, channel_id, pin_latest=False)
         research = self._load(ctx, artifacts, RESEARCH, ResearchOutput)
         script = self._load(ctx, artifacts, SCRIPT, ScriptOutput)

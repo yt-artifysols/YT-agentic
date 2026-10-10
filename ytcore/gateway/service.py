@@ -18,10 +18,14 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from opentelemetry import trace
+
 from ytcore.approvals.hashing import content_hash
 from ytcore.approvals.token import ApprovalClaims, ApprovalError, ApprovalVerifier
 from ytcore.gateway.assets import AssetSource, read_verified
 from ytcore.gateway.clients import ChannelCredentials, UploadMetadata, YouTubeClient
+from ytcore.observability.metrics import record_publish
+from ytcore.observability.tracing import job_span
 from ytcore.safety.assets import AssetRejected, check_asset
 from ytcore.safety.checks import ensure_disclosed
 from ytcore.secrets.provider import SecretRef, SecretsProvider
@@ -172,7 +176,20 @@ class PublishService:
         return claims
 
     def publish(self, job_id: str, token: str, *, actor: str = "gateway") -> PublishResult:
+        with job_span("gateway.publish", job_id) as span:
+            try:
+                result = self._publish(job_id, token, actor)
+            except Exception as exc:
+                record_publish(type(exc).__name__)
+                raise
+            span.set_attribute("publish.duplicate", result.duplicate)
+            span.set_attribute("publish.state", result.state.value)
+            record_publish("duplicate" if result.duplicate else "ok")
+            return result
+
+    def _publish(self, job_id: str, token: str, actor: str) -> PublishResult:
         ctx = self._repo.publish_context(job_id)
+        trace.get_current_span().set_attribute("channel.id", ctx.channel_id)
         claims = self._verify(ctx, token)
         assert ctx.content_hash is not None
         key = idempotency_key(job_id, ctx.content_hash)

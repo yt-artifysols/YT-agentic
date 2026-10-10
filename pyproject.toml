@@ -13,6 +13,7 @@ dependencies = [
   "pydantic>=2.8",
   "pydantic-settings>=2.4",
   "temporalio>=1.8",
+  "opentelemetry-api>=1.27",
 ]
 
 [project.scripts]
@@ -28,6 +29,10 @@ hub = [
 agents = [
   "anthropic>=1.13",
 ]
+otel = [
+  "opentelemetry-sdk>=1.27",
+  "opentelemetry-exporter-otlp-proto-http>=1.27",
+]
 youtube = [
   "google-api-python-client>=2.140",
   "google-auth>=2.30",
@@ -39,6 +44,7 @@ dev = [
   "pre-commit>=3.8",
   "pytest>=8.3",
   "pytest-asyncio>=0.24",
+  "opentelemetry-sdk>=1.27",
   "ruff>=0.6",
 ]
 
@@ -64,7 +70,7 @@ packages = ["ytcore"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["googleapiclient.*", "google.oauth2.*"]
+module = ["googleapiclient.*", "google.oauth2.*", "opentelemetry.exporter.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

@@ -24,6 +24,7 @@ from ytcore.gateway.service import (
     UploadFailed,
     UploadInProgress,
 )
+from ytcore.observability.metrics import observed
 from ytcore.store.errors import (
     ApprovalGateError,
     ApprovalInvalid,
@@ -144,6 +145,7 @@ class JobActivities:
             raise
 
     @activity.defn
+    @observed("transition")
     async def transition(self, job_id: str, to_state: str) -> None:
         try:
             await asyncio.to_thread(
@@ -153,6 +155,7 @@ class JobActivities:
             raise _non_retryable(exc, type(exc).__name__) from exc
 
     @activity.defn
+    @observed("run_stage")
     async def run_stage(
         self, job_id: str, channel_id: str, stage: str, artifacts: dict[str, str] | None = None
     ) -> StageResult:
@@ -177,6 +180,7 @@ class JobActivities:
         return StageResult(stage=stage, artifacts={f"{stage}.out": file_digest(payload)})
 
     @activity.defn
+    @observed("run_qa")
     async def run_qa(
         self, job_id: str, channel_id: str, artifacts: dict[str, str] | None = None
     ) -> QAReport:
@@ -198,6 +202,7 @@ class JobActivities:
         return report
 
     @activity.defn
+    @observed("seal_package")
     async def seal_package(
         self,
         job_id: str,
@@ -235,6 +240,7 @@ class JobActivities:
         )
 
     @activity.defn
+    @observed("approve")
     async def approve(self, job_id: str, token: str) -> str:
         """Consume the approval token and move the job to approved. Returns the approver."""
         try:
@@ -251,6 +257,7 @@ class JobActivities:
         return claims.approver
 
     @activity.defn
+    @observed("publish")
     async def publish(self, job_id: str, token: str) -> PublishOutcome:
         try:
             result = await asyncio.to_thread(self._publisher.publish, job_id, token)
@@ -262,6 +269,7 @@ class JobActivities:
         return PublishOutcome(result.video_id, result.state.value, result.duplicate)
 
     @activity.defn
+    @observed("fail")
     async def fail(self, job_id: str) -> str:
         """Move the job to failed if it can still fail; return its final state."""
         state = await asyncio.to_thread(self._backend.get_state, job_id)

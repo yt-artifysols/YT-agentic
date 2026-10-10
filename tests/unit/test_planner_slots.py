@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
+from itertools import pairwise
 
 from ytcore.planner.daily import ChannelSchedule, compute_slot, target_date
 
@@ -39,7 +40,7 @@ def test_channels_of_one_cluster_are_staggered_and_never_share_a_minute() -> Non
     day = date(2026, 5, 4)
     slots = [compute_slot(sched(channel_id=f"c{i}", cluster_rank=i), day).slot_at for i in range(5)]
     assert len(set(slots)) == 5
-    assert [b - a for a, b in zip(slots, slots[1:], strict=False)] == [timedelta(minutes=30)] * 4
+    assert [b - a for a, b in pairwise(slots)] == [timedelta(minutes=30)] * 4
 
 
 def test_zero_spacing_collapses_the_stagger() -> None:
