@@ -13,7 +13,7 @@ export PGPASSWORD ?= ytcore-dev
 
 setup:
 	uv venv .venv
-	uv pip install -p .venv -e '.[dev,youtube]'
+	uv pip install -p .venv -e '.[dev,hub,youtube]'
 	$(PY) -m pre_commit install
 
 lint:

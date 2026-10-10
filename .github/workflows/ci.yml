@@ -20,7 +20,7 @@ jobs:
         with:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v3
-      - run: uv venv .venv --python 3.12 && uv pip install -p .venv -e '.[dev,youtube]'
+      - run: uv venv .venv --python 3.12 && uv pip install -p .venv -e '.[dev,hub,youtube]'
       - name: Lint
         run: make lint
       - name: Typecheck
@@ -37,7 +37,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
-      - run: uv venv .venv --python 3.12 && uv pip install -p .venv -e '.[dev,youtube]'
+      - run: uv venv .venv --python 3.12 && uv pip install -p .venv -e '.[dev,hub,youtube]'
       - name: Unit and Temporal (time-skipping) tests
         run: make test
 
@@ -62,7 +62,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
-      - run: uv venv .venv --python 3.12 && uv pip install -p .venv -e '.[dev,youtube]'
+      - run: uv venv .venv --python 3.12 && uv pip install -p .venv -e '.[dev,hub,youtube]'
       - name: Install psql
         run: sudo apt-get update -q && sudo apt-get install -y -q postgresql-client
       - name: Migrations + schema guard tests
@@ -87,7 +87,7 @@ jobs:
           tar xzf gitleaks.tgz gitleaks
           ./gitleaks detect --source . --config .gitleaks.toml --redact --no-banner
       - uses: astral-sh/setup-uv@v3
-      - run: uv venv .venv --python 3.12 && uv pip install -p .venv -e '.[dev,youtube]'
+      - run: uv venv .venv --python 3.12 && uv pip install -p .venv -e '.[dev,hub,youtube]'
       - name: Dependency audit
         run: make audit
 
