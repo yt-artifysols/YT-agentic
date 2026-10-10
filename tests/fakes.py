@@ -97,6 +97,7 @@ class FakeBackend:
         self.jobs: dict[str, FakeJob] = {}
         self.approvals: dict[str, FakeApproval] = {}
         self.uploads: dict[str, UploadRecord] = {}
+        self.global_paused = False
         self.quota_used: dict[str, int] = {}
         self.costs_today: dict[str, int] = {}
         self.events: list[tuple[str, str, str]] = []  # (job_id, to_state, actor)
@@ -143,9 +144,8 @@ class FakeBackend:
             raise IllegalTransition(f"illegal job transition {job.state} -> {to_state}")
         if to_state in APPROVAL_GATED_STATES and not self._valid_approval(job):
             raise ApprovalGateError("approval gate: no valid approval")
-        if (
-            to_state in {JobState.SCHEDULED, JobState.PUBLISHING}
-            and not self.channels[job.channel_id].publishable
+        if to_state in {JobState.SCHEDULED, JobState.PUBLISHING} and (
+            self.global_paused or not self.channels[job.channel_id].publishable
         ):
             raise ChannelNotPublishable(job.channel_id)
         if to_state == JobState.PUBLISHED and not self._upload_for(job_id, "uploaded"):
@@ -182,6 +182,9 @@ class FakeBackend:
             raise ApprovalReplayError("approval token already used")
         if job.state != JobState.AWAITING_APPROVAL:
             raise ApprovalGateError("approvals can only be recorded for jobs awaiting approval")
+        ch = self.channels[job.channel_id]
+        if self.global_paused or ch.status != "active" or ch.cluster_status != "active":
+            raise ChannelNotPublishable("approvals are refused while a kill switch is engaged")
         self.approvals[claims.jti] = FakeApproval(job_id, job.content_hash, claims.expires_at)
         self.transition(job_id, JobState.APPROVED, actor=f"approver:{claims.approver}")
         return claims
@@ -248,6 +251,7 @@ class FakeBackend:
             google_project_id=ch.google_project_id,
             credentials_ref=ch.credentials_ref,
             oauth_client_ref=ch.oauth_client_ref,
+            global_paused=self.global_paused,
         )
 
     def approval_consumed(self, job_id: str, jti: str, chash: str) -> bool:

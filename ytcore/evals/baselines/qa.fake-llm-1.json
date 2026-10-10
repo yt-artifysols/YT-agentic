@@ -4,17 +4,17 @@
   "model": "fake-llm-1",
   "prompt_versions": {
     "media": "v1",
-    "qa": "v1",
+    "qa": "v2",
     "research": "v1",
     "script_seo": "v1"
   },
   "prompts": {
     "media": "media.v1@12e2ad79612b",
-    "qa": "qa.v1@496a6ce407b7",
+    "qa": "qa.v2@0e463f0aa64c",
     "research": "research.v1@334b508e0026",
     "script_seo": "script_seo.v1@903b2029ac47"
   },
-  "samples": 22,
+  "samples": 26,
   "scores": {
     "detection_recall": 1.0,
     "specificity": 1.0

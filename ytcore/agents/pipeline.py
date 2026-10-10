@@ -21,6 +21,7 @@ from ytcore.agents.context import (
 from ytcore.agents.costs import CostMeter
 from ytcore.agents.manifest import build_manifest
 from ytcore.agents.media import MediaAgent
+from ytcore.agents.memory import Embedder, HashEmbedder
 from ytcore.agents.models import AssetRef, MediaOutput, ResearchOutput, ScriptOutput
 from ytcore.agents.providers import (
     ImageProvider,
@@ -32,7 +33,7 @@ from ytcore.agents.providers import (
     VideoProvider,
     WebFetcher,
 )
-from ytcore.agents.qa import QAAgent
+from ytcore.agents.qa import QAAgent, SafetyDeps
 from ytcore.agents.research import ResearchAgent
 from ytcore.agents.script_seo import ScriptSeoAgent
 from ytcore.agents.store import AssetStore, ProductionStore
@@ -41,6 +42,8 @@ from ytcore.approvals.hashing import file_digest
 from ytcore.gateway.assets import read_verified
 from ytcore.inputs.store import InputStore
 from ytcore.planner.brief import BriefGenerator
+from ytcore.safety.assets import AssetLimits, check_asset
+from ytcore.safety.duplicates import FingerprintIndex, InMemoryFingerprintIndex
 from ytcore.workflow.models import QAReport
 
 M = TypeVar("M", bound=BaseModel)
@@ -68,8 +71,15 @@ class AgentPipeline:
         memory: MemoryFactory,
         assets: AssetStore,
         providers: Providers,
+        fingerprints: FingerprintIndex | None = None,
+        embedder: Embedder | None = None,
+        asset_limits: AssetLimits | None = None,
     ) -> None:
         self._store, self._assets, self._p = store, assets, providers
+        self._embedder = embedder or HashEmbedder()
+        # Without a shared index (tests, evals) duplicates are only found within this pipeline.
+        self._fingerprints = fingerprints or InMemoryFingerprintIndex()
+        self._limits = asset_limits or AssetLimits.default()
         self._loader = ChannelContextLoader(store, knowledge, memory)
         self._briefs = BriefGenerator(inputs)
         self.research = ResearchAgent(providers.llm)
@@ -94,6 +104,7 @@ class AgentPipeline:
         provider: str,
         license_ref: str | None = None,
     ) -> AssetRef:
+        check_asset(kind, media_type, data, self._limits)  # size, type and signature limits
         digest = self._assets.put(ctx.storage_prefix, data)
         version = self._store.record_asset(
             job_id,
@@ -221,9 +232,16 @@ class AgentPipeline:
         media = self._load(ctx, artifacts, MEDIA, MediaOutput)
         tools = self._toolbox("qa", self._qa_tools(ctx))
         out = self.qa.run(
-            research, script, media, ctx, tools, self._meter(job_id, channel_id, "qa")
+            research,
+            script,
+            media,
+            ctx,
+            tools,
+            self._meter(job_id, channel_id, "qa"),
+            SafetyDeps(job_id, self._fingerprints, self._embedder),
         )
         self._save(job_id, ctx, QA, out)
+        self._store.record_risk(job_id, channel_id, out.risk)
         self._store.record_qa_flags(job_id, [f.detail for f in out.flags if f.severity == "block"])
         return QAReport(
             passed=out.passed,
@@ -250,6 +268,8 @@ class AgentPipeline:
         research = self._load(ctx, artifacts, RESEARCH, ResearchOutput)
         script = self._load(ctx, artifacts, SCRIPT, ScriptOutput)
         media = self._load(ctx, artifacts, MEDIA, MediaOutput)
+        # Remember this script so later videos of the channel are checked for repetition.
+        ctx.memory.add("script", script.full_text(), source_job=job_id)
         return build_manifest(
             job_id=job_id,
             channel_id=channel_id,

@@ -79,4 +79,9 @@ class MediaAgent(Agent):
             "owner_footage": [f.model_dump() for f in research.brief.footage],
         }
         store("video", "video", tools.call(Tool.VIDEO, timeline, inputs))
-        return MediaOutput(assets=assets, prompt_version=self.prompt.ref, model=self.llm.model)
+        return MediaOutput(
+            assets=assets,
+            thumbnail_text=thumb_text,
+            prompt_version=self.prompt.ref,
+            model=self.llm.model,
+        )

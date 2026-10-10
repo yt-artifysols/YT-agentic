@@ -138,9 +138,11 @@ async def _main(args: argparse.Namespace) -> int:  # pragma: no cover - needs Te
     from ytcore.gateway.assets import InMemoryAssetSource
     from ytcore.gateway.clients import FakeYouTubeClient
     from ytcore.gateway.service import PublishService
+    from ytcore.safety.scrub import install_log_scrubber
     from ytcore.secrets.provider import SecretRef
     from ytcore.store.postgres import PostgresStore
 
+    install_log_scrubber()
     settings = load_settings()
     secrets = build_secrets_provider(settings)
     conninfo = secrets.get(SecretRef(settings.database_url_ref)).reveal()

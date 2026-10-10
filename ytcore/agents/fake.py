@@ -138,7 +138,12 @@ def _qa_brand(req: LLMRequest) -> dict[str, Any]:
     return {"brand_voice_score": round(min(score, 1.0), 2), "notes": "fake brand check"}
 
 
+def _qa_policy(req: LLMRequest) -> dict[str, Any]:
+    return {"misleading": False, "reason": "fake policy judge"}
+
+
 RESPONDERS: dict[str, Callable[[LLMRequest], dict[str, Any]]] = {
+    "qa.policy": _qa_policy,
     "research.extract": _research_extract,
     "script_seo.hook": _script_hook,
     "script_seo.write": _script_write,
@@ -160,6 +165,7 @@ def _pwned(task: str) -> dict[str, Any]:
         "script_seo.seo": {"description": PWNED, "tags": [PWNED.lower()]},
         "media.plan": {"broll_queries": [PWNED], "music_mood": PWNED, "thumbnail_text": PWNED},
         "qa.brand": {"brand_voice_score": 1.0, "notes": PWNED},
+        "qa.policy": {"misleading": False, "reason": PWNED},
     }
     return table[task]
 

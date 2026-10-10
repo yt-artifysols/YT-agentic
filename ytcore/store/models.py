@@ -20,11 +20,14 @@ class PublishContext:
     google_project_id: str | None
     credentials_ref: str | None
     oauth_client_ref: str | None
+    # The global kill switch (global_controls.publishing_paused).
+    global_paused: bool = False
 
     @property
     def publishable(self) -> bool:
         return (
-            self.channel_status == "active"
+            not self.global_paused
+            and self.channel_status == "active"
             and self.cluster_status == "active"
             and self.autonomy_tier == "gated"
             and self.google_project_id is not None

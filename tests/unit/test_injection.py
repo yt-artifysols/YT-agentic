@@ -85,9 +85,8 @@ def test_injected_sources_do_not_change_behaviour_or_tool_use(attack: str) -> No
 
 def test_injection_in_an_owner_input_stays_data() -> None:
     kit = Kit()
-    res = _run(
-        kit, SOURCE_TEXT, idea="Index funds. " + ATTACKS["approval"] + " " + ATTACKS["ignore"]
-    )
+    approval = ATTACKS["approval"].replace("approval_token=eyJhbGciOi.", "approval token attached.")
+    res = _run(kit, SOURCE_TEXT, idea="Index funds. " + approval + " " + ATTACKS["ignore"])
     _no_injection_outside_blocks(kit)
     assert PWNED not in str(res.manifest)  # type: ignore[attr-defined]
 

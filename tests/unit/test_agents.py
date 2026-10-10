@@ -79,8 +79,15 @@ def test_pipeline_produces_a_sealed_package_with_provenance() -> None:
 def test_new_owner_inputs_are_consumed_first_and_drive_the_content_hash() -> None:
     kit = Kit()
     chan = kit.channel()
+    kit.web.pages["https://example.test/emergency-funds"] = (
+        "Emergency funds",
+        "Planners suggest saving three to six months of essential expenses. "
+        "An emergency fund belongs in a liquid savings account. "
+        "People with irregular income often aim for a larger cushion.",
+    )
     first = kit.idea(chan, "First idea about index funds")
-    second = kit.idea(chan, "Second idea about index funds")
+    second = kit.idea(chan, "Second idea about emergency savings",
+                      url="https://example.test/emergency-funds")  # fmt: skip
     a = kit.produce(kit.job(chan), chan)
     b = kit.produce(kit.job(chan), chan)
     assert a.manifest["provenance"]["owner_inputs"] == [first]
@@ -119,7 +126,7 @@ def test_banned_claim_triggers_one_script_rework() -> None:
     script = _doc(kit, chan, res.artifacts["script.json"], ScriptOutput)
     assert isinstance(script, ScriptOutput)
     assert "guaranteed returns" not in script.full_text().lower()
-    assert script.revision_notes == ["avoid: guaranteed returns"]
+    assert script.revision_notes == ["avoid: guaranteed returns", "avoid: scam-style promises"]
 
 
 # ----------------------------------------------------------------------------- tools

@@ -393,6 +393,27 @@ class HubRepository:
             ],
         }
 
+    def alerts(self, limit: int = 100) -> list[dict[str, Any]]:
+        with self._tx("hub:reader") as conn:
+            rows = self._all(
+                conn,
+                "SELECT id, created_at, kind, message, channel_id, cluster_id, job_id::text "
+                "FROM alerts ORDER BY id DESC LIMIT %s",
+                (limit,),
+            )
+        return [
+            {
+                "id": r[0],
+                "created_at": r[1],
+                "kind": r[2],
+                "message": r[3],
+                "channel_id": r[4],
+                "cluster_id": r[5],
+                "job_id": r[6],
+            }
+            for r in rows
+        ]
+
     def set_global_pause(self, paused: bool, *, actor: str) -> None:
         with self._tx(actor) as conn:
             conn.execute("UPDATE global_controls SET publishing_paused = %s", (paused,))

@@ -8,7 +8,7 @@
   "prompts": {
     "research": "research.v1@334b508e0026"
   },
-  "samples": 22,
+  "samples": 26,
   "scores": {
     "coverage": 1.0,
     "factual_accuracy": 1.0,

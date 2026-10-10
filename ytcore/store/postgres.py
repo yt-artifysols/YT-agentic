@@ -275,7 +275,8 @@ class PostgresStore:
                 """
                 SELECT j.id::text, j.channel_id, j.state, j.content_hash, j.manifest,
                        c.storage_prefix, c.status, k.status, c.autonomy_tier,
-                       c.google_project_id, c.youtube_credentials_ref, g.oauth_client_ref
+                       c.google_project_id, c.youtube_credentials_ref, g.oauth_client_ref,
+                       (SELECT publishing_paused FROM global_controls)
                 FROM video_jobs j
                 JOIN channels c ON c.id = j.channel_id
                 LEFT JOIN clusters k ON k.id = c.cluster_id
@@ -299,6 +300,7 @@ class PostgresStore:
             google_project_id=row[9],
             credentials_ref=row[10],
             oauth_client_ref=row[11],
+            global_paused=bool(row[12]),
         )
 
     def approval_consumed(self, job_id: str, jti: str, chash: str) -> bool:

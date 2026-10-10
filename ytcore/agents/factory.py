@@ -11,13 +11,14 @@ from ytcore.agents.fake import (
     FakeVideo,
     FakeWebFetcher,
 )
-from ytcore.agents.memory import PostgresMemory
+from ytcore.agents.memory import HashEmbedder, PostgresMemory
 from ytcore.agents.pipeline import AgentPipeline, Providers
 from ytcore.agents.providers import LLMProvider, WebFetcher
 from ytcore.agents.store import AssetStore
 from ytcore.config.settings import Settings
 from ytcore.inputs.store import PostgresInputs
 from ytcore.knowledge.store import PostgresKnowledge
+from ytcore.safety.duplicates import PostgresFingerprintIndex
 from ytcore.secrets.provider import SecretsProvider
 from ytcore.store.production import PostgresProductionStore
 
@@ -64,11 +65,14 @@ def build_postgres_pipeline(
     def connect() -> psycopg.Connection[tuple[object, ...]]:
         return psycopg.connect(conninfo, autocommit=True)
 
+    embedder = HashEmbedder()  # dev embedder; one instance so memory and fingerprints agree
     return AgentPipeline(
         store=PostgresProductionStore(connect),
         knowledge=PostgresKnowledge(connect),
         inputs=PostgresInputs(connect),
-        memory=PostgresMemory(connect),
+        memory=PostgresMemory(connect, embedder),
         assets=assets,
         providers=providers,
+        fingerprints=PostgresFingerprintIndex(connect),
+        embedder=embedder,
     )

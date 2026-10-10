@@ -13,6 +13,8 @@ import re
 import secrets
 import unicodedata
 
+from ytcore.safety.scrub import scrub
+
 OPEN = "<<<UNTRUSTED_DATA"
 CLOSE = "<<<END_UNTRUSTED_DATA"
 _BLOCK = re.compile(
@@ -45,6 +47,8 @@ def _neutralise(text: str) -> str:
     text = unicodedata.normalize("NFKC", text)
     # Drop control characters except newline and tab.
     text = "".join(ch for ch in text if ch in "\n\t" or unicodedata.category(ch)[0] != "C")
+    # Credentials pasted into (or planted in) external content never reach a model.
+    text = scrub(text)
     # Make the block markers impossible to forge from inside the content.
     return text.replace("<<<", "\u2039\u2039\u2039").replace(">>>", "\u203a\u203a\u203a")
 

@@ -181,6 +181,16 @@ class BatchOut(BaseModel):
     results: list[BatchItemOut]
 
 
+class AlertOut(BaseModel):
+    id: int
+    created_at: datetime
+    kind: str
+    message: str
+    channel_id: str | None
+    cluster_id: str | None
+    job_id: str | None
+
+
 class KillSwitchIn(BaseModel):
     paused: bool
     reason: str = Field(default="", max_length=500)
@@ -680,6 +690,14 @@ def create_app(deps: HubDeps) -> FastAPI:
     @api.get("/controls", tags=["controls"], dependencies=[read_limit])
     async def controls(ctx: Session) -> dict[str, Any]:
         return await asyncio.to_thread(deps.repo.controls)
+
+    @api.get("/alerts", tags=["controls"], response_model=list[AlertOut], dependencies=[read_limit])
+    async def alerts(
+        ctx: Session, limit: Annotated[int, Query(ge=1, le=200)] = 100
+    ) -> list[AlertOut]:
+        """Budget caps, circuit-breaker trips and other operator alerts."""
+        require_role(ctx, "operator", "admin")
+        return [AlertOut(**a) for a in await asyncio.to_thread(deps.repo.alerts, limit)]
 
     @api.post("/controls/global", tags=["controls"], response_model=Ok, dependencies=[write_limit])
     async def kill_global(body: KillSwitchIn, ctx: Session) -> Ok:

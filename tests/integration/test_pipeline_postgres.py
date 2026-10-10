@@ -151,6 +151,7 @@ def test_paused_channel_or_cluster_is_blocked(
 ) -> None:
     ch = channel()
     job, token, _ = rig.scheduled(ch)
+    other, _, _ = rig.approved(ch)  # approvals are refused once a kill switch is engaged
     if target == "channel":
         sql("UPDATE channels SET status = 'paused' WHERE id = %s", ch)
     else:
@@ -159,7 +160,6 @@ def test_paused_channel_or_cluster_is_blocked(
     with pytest.raises(PublishRefused):
         rig.service.publish(job, token)
     # The DB blocks it even if the gateway check were bypassed.
-    other, _, _ = rig.approved(ch)
     with pytest.raises(ChannelNotPublishable):
         rig.store.transition(other, JobState.SCHEDULED, actor="scheduler")
     assert rig.client.uploads == []

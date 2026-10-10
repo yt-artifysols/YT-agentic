@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 READS = {
     "/api/auth/me",
     "/api/controls",
+    "/api/alerts",
     "/api/jobs",
     "/api/jobs/{job_id}",
     "/api/jobs/{job_id}/assets/{name}",

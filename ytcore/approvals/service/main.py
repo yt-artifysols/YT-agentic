@@ -24,6 +24,7 @@ from ytcore.approvals.token import ApprovalSigner, ApprovalVerifier
 from ytcore.gateway.assets import AssetSource, InMemoryAssetSource
 from ytcore.inputs.store import PostgresInputs
 from ytcore.knowledge.store import PostgresKnowledge
+from ytcore.safety.scrub import install_log_scrubber
 from ytcore.store.postgres import PostgresStore
 from ytcore.workflow.models import HubDecision
 
@@ -57,6 +58,7 @@ def create_hub_app(
     assets: AssetSource | None = None,
     secrets: Any = None,
 ) -> FastAPI:
+    install_log_scrubber()
     keys = key_provider or build_key_provider(settings)
     repo = HubRepository.from_conninfo(conninfo, fast_lane_max_risk=settings.fast_lane_max_risk)
     # The store only ever gets the PUBLIC key; the private key stays inside the signer.

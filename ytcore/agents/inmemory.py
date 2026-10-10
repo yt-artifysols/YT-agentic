@@ -38,6 +38,7 @@ class InMemoryProductionStore:
     licenses: dict[str, License] = field(default_factory=dict)
     qa_notes: dict[str, list[str]] = field(default_factory=dict)
     rejections: dict[str, str] = field(default_factory=dict)
+    risks: list[tuple[str, str, dict[str, Any]]] = field(default_factory=list)
 
     def add_channel(
         self,
@@ -151,6 +152,9 @@ class InMemoryProductionStore:
             }
         )
         return version
+
+    def record_risk(self, job_id: str, channel_id: str, assessment: dict[str, Any]) -> None:
+        self.risks.append((job_id, channel_id, dict(assessment)))
 
     def revision_notes(self, job_id: str) -> list[str]:
         notes = list(self.qa_notes.get(job_id, []))

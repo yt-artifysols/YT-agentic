@@ -19,6 +19,7 @@ from typing import Any, Protocol
 import psycopg
 
 from ytcore.knowledge.models import KnowledgeDoc, KnowledgeKind, KnowledgeSnapshot
+from ytcore.safety.scrub import SecretInInput, ensure_no_secrets
 from ytcore.store.errors import KnowledgeForbidden, KnowledgeStale, StoreError
 from ytcore.store.postgres import Connect, map_db_error
 
@@ -37,6 +38,13 @@ class ChannelKnowledge(Protocol):
     def pinned(self, job_id: str) -> KnowledgeSnapshot: ...
 
     def drafts(self) -> list[KnowledgeDoc]: ...
+
+
+def _no_secrets(content: str) -> None:
+    try:
+        ensure_no_secrets(content, "knowledge content")
+    except SecretInInput as exc:
+        raise StoreError(str(exc)) from None
 
 
 _COLS = (
@@ -90,6 +98,7 @@ class PostgresChannelKnowledge:
     def propose(
         self, kind: KnowledgeKind, content: str, *, proposed_by: str, base_version: int | None
     ) -> KnowledgeDoc:
+        _no_secrets(content)
         with self._tx(proposed_by) as conn:
             row = conn.execute(
                 "INSERT INTO knowledge_docs (channel_id, kind, version, base_version, content, "  # noqa: S608
@@ -229,6 +238,7 @@ class InMemoryChannelKnowledge:
     ) -> KnowledgeDoc:
         if not content or len(content) > 100_000:
             raise StoreError("knowledge content must be 1..100000 characters")
+        _no_secrets(content)
         mine = [d for d in self.base.docs.values() if d.channel_id == self.channel_id]
         if base_version is not None and not any(
             d.kind == kind and d.version == base_version and d.status == "approved" for d in mine

@@ -20,7 +20,12 @@ from ytcore.approvals.service.notify import Notification, Notifier
 from ytcore.approvals.service.repo import HubConflict, HubRepository, User
 from ytcore.approvals.service.signals import WorkflowSignaler
 from ytcore.approvals.token import ApprovalClaims, ApprovalSigner
-from ytcore.store.errors import ApprovalGateError, ApprovalInvalid, ApprovalReplayError
+from ytcore.store.errors import (
+    ApprovalGateError,
+    ApprovalInvalid,
+    ApprovalReplayError,
+    ChannelNotPublishable,
+)
 from ytcore.workflow.models import HubDecision
 
 log = logging.getLogger(__name__)
@@ -39,6 +44,12 @@ class HubNotFound(HubError):
 
 class HubStale(HubError):
     status = 409
+
+
+class HubPaused(HubError):
+    """A kill switch (global, cluster or channel) is engaged; nothing can be approved."""
+
+    status = 423
 
 
 class HubSignalFailed(HubError):
@@ -121,6 +132,11 @@ class ApprovalHub:
             await asyncio.to_thread(
                 self._store.verify_approval, job_id, token, actor=f"hub:{user.username}"
             )
+        except ChannelNotPublishable as exc:
+            raise HubPaused(
+                "a kill switch is engaged for this channel, its cluster or globally; "
+                "nothing can be approved until it is released"
+            ) from exc
         except (ApprovalInvalid, ApprovalGateError, ApprovalReplayError) as exc:
             raise HubStale(f"approval refused: {exc}") from exc
         await asyncio.to_thread(

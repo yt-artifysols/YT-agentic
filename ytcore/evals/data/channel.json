@@ -10,6 +10,14 @@
     ],
     "forbidden_words": [
       "hype"
-    ]
+    ],
+    "safety": {
+      "banned_topics": [
+        "lottery"
+      ],
+      "sensitive": {
+        "finance": "allow"
+      }
+    }
   }
 }

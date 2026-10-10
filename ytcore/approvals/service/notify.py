@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from ytcore.approvals.service.settings import HubSettings
 
 log = logging.getLogger(__name__)
-Kind = Literal["items_waiting", "deadline_approaching", "kill_switch"]
+Kind = Literal["items_waiting", "deadline_approaching", "kill_switch", "breaker_tripped"]
 
 
 @dataclass(frozen=True)

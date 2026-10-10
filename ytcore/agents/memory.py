@@ -49,6 +49,7 @@ class MemoryItem:
     kind: str
     content: str
     score: float
+    source_job: str | None = None
 
 
 class ChannelMemory(Protocol):
@@ -100,7 +101,8 @@ class PostgresChannelMemory:
     def search(self, query: str, *, k: int = 5) -> list[MemoryItem]:
         with self._tx("memory") as conn:
             rows = conn.execute(
-                "SELECT kind, content, 1 - (embedding <=> %s::vector) FROM channel_memory "
+                "SELECT kind, content, 1 - (embedding <=> %s::vector), source_job::text "
+                "FROM channel_memory "
                 "WHERE channel_id = %s AND namespace = %s AND embedding_model = %s "
                 "ORDER BY embedding <=> %s::vector, id LIMIT %s",
                 (
@@ -112,7 +114,7 @@ class PostgresChannelMemory:
                     k,
                 ),
             ).fetchall()
-        return [MemoryItem(r[0], r[1], float(r[2] or 0.0)) for r in rows]
+        return [MemoryItem(r[0], r[1], float(r[2] or 0.0), r[3]) for r in rows]
 
 
 class PostgresMemory:
@@ -138,7 +140,7 @@ class PostgresMemory:
 @dataclass
 class InMemoryMemory:
     namespaces: dict[str, str] = field(default_factory=dict)  # channel -> namespace
-    rows: list[tuple[str, str, str, str, list[float]]] = field(default_factory=list)
+    rows: list[tuple[str, str, str, str, list[float], str | None]] = field(default_factory=list)
     embedder: Embedder = field(default_factory=HashEmbedder)
 
     def for_channel(self, channel_id: str) -> InMemoryChannelMemory:
@@ -158,14 +160,21 @@ class InMemoryChannelMemory:
         if self.base.namespaces.get(self.channel_id) != self.namespace:
             raise StoreError("namespace does not belong to this channel")
         self.base.rows.append(
-            (self.channel_id, self.namespace, kind, content, self.base.embedder.embed(content))
+            (
+                self.channel_id,
+                self.namespace,
+                kind,
+                content,
+                self.base.embedder.embed(content),
+                source_job,
+            )
         )
 
     def search(self, query: str, *, k: int = 5) -> list[MemoryItem]:
         q = self.base.embedder.embed(query)
         scored = [
-            MemoryItem(kind, content, sum(a * b for a, b in zip(q, vec, strict=True)))
-            for chan, ns, kind, content, vec in self.base.rows
+            MemoryItem(kind, content, sum(a * b for a, b in zip(q, vec, strict=True)), job)
+            for chan, ns, kind, content, vec, job in self.base.rows
             if chan == self.channel_id and ns == self.namespace
         ]
         return sorted(scored, key=lambda m: -m.score)[:k]

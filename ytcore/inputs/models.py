@@ -6,6 +6,7 @@ from datetime import datetime
 from enum import StrEnum
 
 from ytcore.approvals.hashing import file_digest
+from ytcore.safety.scrub import ensure_no_secrets
 
 URI_RE = re.compile(r"^(file|gs|s3|https)://\S{1,2000}$")
 
@@ -48,6 +49,8 @@ def validate_input(kind: InputKind, body: str | None, uri: str | None, sha256: s
         raise ValueError("uri must be file://, gs://, s3:// or https://")
     if body is not None and not 1 <= len(body) <= 20_000:
         raise ValueError("body must be 1..20000 characters")
+    if body is not None:
+        ensure_no_secrets(body, "an owner input")
     if uri is None:
         assert body is not None
         digest = body_digest(body)

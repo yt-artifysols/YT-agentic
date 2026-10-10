@@ -92,6 +92,7 @@ class AssetRef(Strict):
 
 class MediaOutput(Strict):
     assets: list[AssetRef]
+    thumbnail_text: str = Field(default="", max_length=80)
     prompt_version: str
     model: str
 
@@ -112,5 +113,7 @@ class QAOutput(Strict):
     flags: list[QAFlag]
     rework_stage: Literal["scripting", "rendering"] | None = None
     brand_voice_score: float = Field(ge=0, le=1)
+    # The risk assessment (ytcore/safety/risk.py RiskAssessment.to_json()), stored on the job.
+    risk: dict[str, object] = Field(default_factory=dict)
     prompt_version: str
     model: str

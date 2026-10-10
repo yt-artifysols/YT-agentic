@@ -22,6 +22,8 @@ from ytcore.approvals.hashing import content_hash
 from ytcore.approvals.token import ApprovalClaims, ApprovalError, ApprovalVerifier
 from ytcore.gateway.assets import AssetSource, read_verified
 from ytcore.gateway.clients import ChannelCredentials, UploadMetadata, YouTubeClient
+from ytcore.safety.assets import AssetRejected, check_asset
+from ytcore.safety.checks import ensure_disclosed
 from ytcore.secrets.provider import SecretRef, SecretsProvider
 from ytcore.store.errors import QuotaExhausted
 from ytcore.store.models import PublishContext, UploadRecord
@@ -101,6 +103,15 @@ def _metadata(manifest: dict[str, Any]) -> UploadMetadata:
     synthetic = meta.get("contains_synthetic_media")
     if not isinstance(synthetic, bool):
         raise PublishRefused("manifest must declare contains_synthetic_media explicitly")
+    # Generated voice, images or video are realistic synthetic media: the upload must say so. A
+    # manifest that does not describe its assets is treated as generated (the conservative case).
+    info = manifest.get("asset_info")
+    try:
+        ensure_disclosed(
+            info if isinstance(info, dict) else {"unknown": {"kind": "video"}}, synthetic
+        )
+    except ValueError as exc:
+        raise PublishRefused(str(exc)) from None
     privacy = meta.get("privacy_status", "private")
     if privacy not in {"private", "unlisted", "public"}:
         raise PublishRefused(f"invalid privacy_status {privacy!r}")
@@ -185,6 +196,11 @@ class PublishService:
         if not isinstance(video_digest, str):
             raise PublishRefused("manifest has no video asset")
         media = read_verified(self._assets, ctx.storage_prefix, video_digest)
+        video_info = (ctx.manifest.get("asset_info") or {}).get("video", {})
+        try:
+            check_asset("video", str(video_info.get("media_type", "video/mp4")), media)
+        except AssetRejected as exc:
+            raise PublishRefused(f"video asset rejected: {exc}") from None
         credentials = self._credentials(ctx)
 
         if existing is not None and existing.status == "pending":
@@ -201,6 +217,12 @@ class PublishService:
         )
         if upload.status != "pending" or upload.youtube_video_id is not None:
             raise UploadInProgress(f"upload {upload.id} was started by a concurrent attempt")
+
+        # Re-check the kill switches (global, cluster, channel) immediately before the call to
+        # YouTube; an operator may have engaged one while this publish was in flight.
+        if not self._repo.publish_context(job_id).publishable:
+            self._repo.fail_upload(upload.id, "KillSwitch", actor=actor)
+            raise PublishRefused("a kill switch was engaged before the upload started")
 
         try:
             video_id = self._client.upload_resumable(

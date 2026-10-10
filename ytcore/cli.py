@@ -25,6 +25,7 @@ from ytcore.inputs.models import InputKind
 from ytcore.inputs.store import InputStore, PostgresInputs
 from ytcore.knowledge.models import KnowledgeKind
 from ytcore.knowledge.store import PostgresKnowledge
+from ytcore.safety.scrub import install_log_scrubber
 from ytcore.store.errors import StoreError
 
 
@@ -74,6 +75,7 @@ def main(
     knowledge: Any = None,
     actor: str | None = None,
 ) -> int:
+    install_log_scrubber()
     args = _parser().parse_args(argv)
     who = actor or f"cli:{getpass.getuser()}"
     try:

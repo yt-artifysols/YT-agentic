@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Any, Protocol
 
 from ytcore.agents.context import ChannelDirectory
 from ytcore.agents.costs import CostLedger
@@ -26,6 +26,10 @@ class ProductionStore(ChannelDirectory, CostLedger, Protocol):
         ...
 
     def license_valid(self, license_ref: str, channel_id: str) -> bool: ...
+
+    def record_risk(self, job_id: str, channel_id: str, assessment: dict[str, Any]) -> None:
+        """Store the risk assessment (score 0..1 and named reasons) on the job."""
+        ...
 
     def revision_notes(self, job_id: str) -> list[str]:
         """Notes for a rework: blocking QA findings and the latest human rejection reason."""

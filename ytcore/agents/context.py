@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from ytcore.agents.memory import ChannelMemory
 from ytcore.knowledge.models import KnowledgeKind, KnowledgeSnapshot
 from ytcore.knowledge.store import ChannelKnowledge
+from ytcore.safety.policy import SafetyPolicy
 
 
 class ChannelPolicy(BaseModel):
@@ -33,6 +34,7 @@ class ChannelPolicy(BaseModel):
     voice: str = "narrator-1"
     tone_words: list[str] = Field(default_factory=list)
     forbidden_words: list[str] = Field(default_factory=list)
+    safety: SafetyPolicy = Field(default_factory=SafetyPolicy)
 
 
 @dataclass(frozen=True)

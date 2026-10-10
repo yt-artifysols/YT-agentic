@@ -128,6 +128,22 @@ class PostgresProductionStore:
             row = conn.execute("SELECT license_valid(%s, %s)", (license_ref, channel_id)).fetchone()
         return bool(row and row[0])
 
+    def record_risk(self, job_id: str, channel_id: str, assessment: dict[str, Any]) -> None:
+        with self._tx("agent:qa") as conn:
+            conn.execute(
+                "INSERT INTO job_risk (job_id, channel_id, score, escalate, blocked, reasons, "
+                "thresholds) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                (
+                    job_id,
+                    channel_id,
+                    assessment["score"],
+                    bool(assessment["escalate"]),
+                    bool(assessment["block"]),
+                    Jsonb(assessment["reasons"]),
+                    Jsonb(assessment.get("thresholds", {})),
+                ),
+            )
+
     def revision_notes(self, job_id: str) -> list[str]:
         with self._tx("reader") as conn:
             qa = conn.execute(

@@ -68,14 +68,22 @@ class Kit:
         assert self.pipeline is not None
         return self.pipeline
 
-    def channel(self, channel_id: str = "chan-a", *, seed: bool = True, **kw: Any) -> str:
+    def channel(
+        self,
+        channel_id: str = "chan-a",
+        *,
+        seed: bool = True,
+        safety: dict[str, Any] | None = None,
+        **kw: Any,
+    ) -> str:
         self.store.add_channel(channel_id, **kw)
+        policy = POLICY | ({"safety": safety} if safety else {})
         if seed:
             for kind, content in (
                 (KnowledgeKind.BRAND_VOICE, BRAND_VOICE),
                 (KnowledgeKind.HOOK_LIBRARY, HOOKS),
                 (KnowledgeKind.BANNED_CLAIMS, BANNED),
-                (KnowledgeKind.POLICY, json.dumps(POLICY)),
+                (KnowledgeKind.POLICY, json.dumps(policy)),
             ):
                 self.knowledge.seed_approved(channel_id, kind, content)
         return channel_id

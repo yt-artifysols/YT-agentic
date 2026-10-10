@@ -14,6 +14,7 @@ from ytcore.agents.context import ChannelPolicy
 from ytcore.agents.models import MediaOutput, QAOutput, ResearchOutput, ScriptOutput
 from ytcore.approvals.hashing import content_hash
 from ytcore.knowledge.models import KnowledgeSnapshot
+from ytcore.safety.checks import ensure_disclosed
 
 PIPELINE_VERSION = "agents-v1"
 
@@ -76,4 +77,5 @@ def build_manifest(
         },
     }
     content_hash(manifest)  # validates every asset digest
+    ensure_disclosed(manifest["asset_info"], manifest["metadata"]["contains_synthetic_media"])
     return manifest

@@ -6,12 +6,14 @@ injection check. Tools: read-only storage and the rights register.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
 from pydantic import Field
 
 from ytcore.agents.base import Agent, Reply
 from ytcore.agents.context import ChannelContext
 from ytcore.agents.costs import CostMeter
+from ytcore.agents.memory import Embedder
 from ytcore.agents.models import (
     MediaOutput,
     QAFlag,
@@ -22,6 +24,14 @@ from ytcore.agents.models import (
 )
 from ytcore.agents.tools import Tool, ToolBox
 from ytcore.agents.untrusted import injection_signals
+from ytcore.safety import risk as risk_mod
+from ytcore.safety.checks import GENERATED_KINDS, AssetView, CheckInput, Finding, check_content
+from ytcore.safety.duplicates import (
+    DuplicateMatch,
+    FingerprintIndex,
+    Fingerprints,
+    text_similarity,
+)
 
 REQUIRED_ASSETS = ("video", "thumbnail", "voiceover")
 _STOP = frozenset(
@@ -51,7 +61,26 @@ class _Brand(Reply):
     notes: str = Field(default="", max_length=500)
 
 
-RISK = {"info": 0, "warn": 15, "block": 40}
+class _Policy(Reply):
+    misleading: bool
+    reason: str = Field(default="", max_length=300)
+
+
+@dataclass(frozen=True)
+class SafetyDeps:
+    """Platform services QA code (never a model) uses: the cross-channel fingerprint index."""
+
+    job_id: str
+    fingerprints: FingerprintIndex
+    embedder: Embedder
+
+
+DUPLICATE_CODES = {
+    "script": ("duplicate_script", "scripting"),
+    "media": ("reused_media", "rendering"),
+    "title_template": ("repeated_title_template", "scripting"),
+    "thumbnail_text": ("repeated_thumbnail_text", "rendering"),
+}
 
 
 class QAAgent(Agent):
@@ -65,6 +94,7 @@ class QAAgent(Agent):
         ctx: ChannelContext,
         tools: ToolBox,
         meter: CostMeter,
+        safety: SafetyDeps,
     ) -> QAOutput:
         flags: list[QAFlag] = []
         script_stage, render_stage = False, False
@@ -146,16 +176,89 @@ class QAAgent(Agent):
             except (LookupError, ValueError, OSError) as exc:
                 flag("asset_integrity", "block", f"{asset.name}: {exc}")
                 render_stage = True
-            if asset.kind in ("music", "stock") and not (
-                asset.license_ref and tools.call(Tool.RIGHTS_READ, asset.license_ref)
-            ):
-                flag(
-                    "license_invalid",
-                    "block",
-                    f"{asset.name} has no valid license",
-                    asset.license_ref or "",
-                )
-                render_stage = True
+
+        # Policy rules (docs/policy-sources.md): deterministic first.
+        policy = ctx.policy.safety
+        history = [
+            m
+            for m in ctx.memory.search(text, k=5)
+            if m.kind == "script" and m.source_job != safety.job_id
+        ]
+        history_similarity = max((text_similarity(text, m.content) for m in history), default=0.0)
+        result = check_content(
+            CheckInput(
+                topic=research.brief.topic,
+                title=script.title,
+                script_text=text,
+                description=script.description,
+                tags=tuple(script.tags),
+                thumbnail_text=media.thumbnail_text,
+                assets=tuple(
+                    AssetView(a.name, a.kind, a.sha256, a.license_ref, a.provider)
+                    for a in media.assets
+                ),
+                safety=policy,
+                license_ok=lambda ref: bool(tools.call(Tool.RIGHTS_READ, ref)),
+                history_similarity=history_similarity,
+            )
+        )
+        stages: set[str] = set()
+        for finding in result.findings:
+            self._add(flags, finding)
+            if finding.severity == "block" and finding.stage:
+                stages.add(finding.stage)
+        if "scripting" in stages:
+            script_stage = True
+        if "rendering" in stages:
+            render_stage = True
+
+        # The model is asked only about the borderline title/thumbnail cases rules cannot settle.
+        if result.borderline:
+            verdict = self.ask(
+                "policy",
+                _Policy,
+                meter=meter,
+                guidance=ctx.guidance(),
+                max_tokens=200,
+                task="Could the title or thumbnail text mislead viewers about this video?",
+                data=[
+                    ("title", script.title),
+                    ("thumbnail text", media.thumbnail_text),
+                    ("script excerpt", text[:1500]),
+                ],
+            )
+            if verdict.misleading:
+                for label in result.borderline:
+                    flag(
+                        f"misleading_{label}",
+                        "warn",
+                        f"the {label} may mislead viewers (model judgment)",
+                        verdict.reason,
+                    )
+
+        # Cross-channel duplicates: code-only; match details go to human approvers as evidence.
+        generated = {a.name: a.sha256 for a in media.assets if a.kind in GENERATED_KINDS}
+        fingerprints = Fingerprints.build(
+            script_text=text,
+            title=script.title,
+            thumbnail_text=media.thumbnail_text,
+            media=generated,
+            embedder=safety.embedder,
+        )
+        report = safety.fingerprints.find(
+            job_id=safety.job_id,
+            channel_id=ctx.channel_id,
+            fp=fingerprints,
+            thresholds=policy.duplicates,
+        )
+        for match in report.matches:
+            code, dup_stage = DUPLICATE_CODES[match.kind]
+            severity: Severity = "block" if match.action == "block" else "warn"
+            flag(code, severity, self._duplicate_detail(match), match.evidence())
+            if severity == "block":
+                script_stage |= dup_stage == "scripting"
+                render_stage |= dup_stage == "rendering"
+        safety.fingerprints.record(job_id=safety.job_id, channel_id=ctx.channel_id, fp=fingerprints)
         flag("synthetic_media_disclosed", "info", "AI-produced; disclosed as synthetic media")
 
         # Brand voice (model-judged against the approved brand voice).
@@ -180,15 +283,61 @@ class QAAgent(Agent):
                 brand.notes,
             )
 
+        # Risk score: 0..1 with named reasons, stored on the job by the pipeline.
+        cited_ids = [{i for i in seg.fact_ids if i in facts} for seg in script.segments]
+        assessment = risk_mod.assess(
+            risk_mod.RiskInputs(
+                total_claims=len(script.segments),
+                unsourced_claims=sum(1 for c in cited_ids if not c),
+                sensitive_topics=tuple(result.sensitive),
+                rights=tuple(result.rights),
+                brand_voice_score=brand.brand_voice_score,
+                history_similarity=history_similarity,
+                owner_inputs_used=len(research.brief.owner_input_ids),
+                cross_channel_similarity=report.script_similarity,
+                policy_warnings=sum(1 for f in flags if f.severity == "warn"),
+            ),
+            policy,
+        )
+        names = ", ".join(f"{r.code} {r.contribution:.2f}" for r in assessment.reasons[:4])
+        if assessment.block:
+            flag("risk_too_high", "block", f"avoid: too many risk signals ({names})", names)
+            script_stage = True
+        elif assessment.escalate:
+            flag("risk_escalated", "warn", "risk is high; review closely", names)
+
         blocked = any(f.severity == "block" for f in flags)
-        risk = min(100, 5 + sum(RISK[f.severity] for f in flags))
         stage = "scripting" if script_stage else "rendering" if render_stage else None
         return QAOutput(
             passed=not blocked,
-            risk_score=risk,
+            risk_score=assessment.score_100,
             flags=flags,
             rework_stage=stage if blocked else None,
             brand_voice_score=brand.brand_voice_score,
+            risk=assessment.to_json(),
             prompt_version=self.prompt.ref,
             model=self.llm.model,
         )
+
+    @staticmethod
+    def _add(flags: list[QAFlag], finding: Finding) -> None:
+        flags.append(
+            QAFlag(
+                code=finding.code,
+                severity=finding.severity,
+                detail=finding.detail[:500],
+                evidence=finding.evidence[:400],
+            )
+        )
+
+    @staticmethod
+    def _duplicate_detail(match: DuplicateMatch) -> str:
+        # Generic on purpose: this text can reach the script writer as a revision note, so it
+        # never names another channel or job.
+        what = {
+            "script": "the script is too similar to another channel's",
+            "media": "generated media is identical to another channel's",
+            "title_template": "the title format is used by many other channels",
+            "thumbnail_text": "the thumbnail text is used by many other channels",
+        }[match.kind]
+        return f"avoid: {what}" if match.action == "block" else f"{what} (escalated)"
