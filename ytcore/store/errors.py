@@ -45,3 +45,23 @@ class QuotaExhausted(StoreError):
 
 class UploadGuardError(StoreError):
     pass
+
+
+class JobBudgetExceeded(BudgetExceeded):
+    """The per-job budget cap was hit."""
+
+
+class KnowledgeStale(StoreError):
+    """The knowledge draft is based on an older approved version."""
+
+
+class KnowledgeForbidden(StoreError):
+    """Knowledge can only be approved or rejected by an active human approver."""
+
+
+class LicenseInvalid(StoreError):
+    """A music or stock asset has no valid license for the channel."""
+
+
+class InputRejected(StoreError):
+    """An owner input violates a rule (duplicate, immutable, wrong channel, archived)."""

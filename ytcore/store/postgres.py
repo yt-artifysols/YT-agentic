@@ -31,7 +31,11 @@ from ytcore.store.errors import (
     ChannelNotPublishable,
     ContentFrozen,
     IllegalTransition,
+    JobBudgetExceeded,
     JobNotFound,
+    KnowledgeForbidden,
+    KnowledgeStale,
+    LicenseInvalid,
     QuotaExhausted,
     StoreError,
     UploadGuardError,
@@ -43,6 +47,9 @@ Connect = Callable[[], psycopg.Connection[Any]]
 
 _BY_SQLSTATE: dict[str, type[StoreError]] = {
     "YTB01": BudgetExceeded,
+    "YTB02": JobBudgetExceeded,
+    "YTK01": KnowledgeStale,
+    "YTL01": LicenseInvalid,
     "YTQ01": QuotaExhausted,
     "YTC01": ChannelNotPublishable,
     "YTU01": UploadGuardError,
@@ -54,6 +61,8 @@ _BY_MESSAGE: tuple[tuple[str, str, type[StoreError]], ...] = (
     ("23514", "approval content_hash does not match", ApprovalGateError),
     ("42501", "approval gate", ApprovalGateError),
     ("42501", "upload requires a valid approval", ApprovalGateError),
+    ("42501", "knowledge", KnowledgeForbidden),
+    ("42501", "jobs may only use approved knowledge", KnowledgeForbidden),
 )
 
 
