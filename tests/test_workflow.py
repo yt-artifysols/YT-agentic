@@ -175,3 +175,115 @@ async def test_kill_switch_cancels(env: WorkflowEnvironment) -> None:
         result = await handle.result()
     assert result.final_state == JobState.CANCELLED.value
     assert h.client.uploads == []
+
+
+# ----------------------------------------------------------------- approval hub decisions
+
+
+async def test_hub_approval_is_accepted_once_recorded(env: WorkflowEnvironment) -> None:
+    from ytcore.workflow.models import HubDecision
+
+    h = Harness()
+    async with h.worker(env):
+        handle, inp = await h.start(env)
+        await _await_state(handle, JobState.AWAITING_APPROVAL)
+        token = h.token(inp)
+        h.backend.verify_approval(inp.job_id, token, actor="hub:approver1")  # hub's DB write
+        chash = h.backend.jobs[inp.job_id].content_hash or ""
+        await handle.signal(
+            VideoJobWorkflow.hub_decision, HubDecision("approve", "approver1", chash, token=token)
+        )
+        result = await handle.result()
+    assert result.final_state == JobState.LIVE.value
+    assert len(h.client.uploads) == 1
+
+
+async def test_hub_approve_without_db_record_is_ignored(env: WorkflowEnvironment) -> None:
+    from ytcore.workflow.models import HubDecision
+
+    h = Harness()
+    async with h.worker(env):
+        handle, inp = await h.start(env, approval_timeout_seconds=3600)
+        await _await_state(handle, JobState.AWAITING_APPROVAL)
+        forged = h.token(inp, "sha256:" + "1" * 64)
+        await handle.signal(
+            VideoJobWorkflow.hub_decision, HubDecision("approve", "x", "sha256:" + "1" * 64, forged)
+        )
+        result = await handle.result()
+    assert result.final_state == JobState.CANCELLED.value and result.replanned
+    assert h.client.uploads == []
+
+
+async def test_hub_edit_reruns_qa_and_never_approves(env: WorkflowEnvironment) -> None:
+    from ytcore.approvals.hashing import content_hash
+    from ytcore.workflow.models import HubDecision
+
+    h = Harness()
+    async with h.worker(env):
+        handle, inp = await h.start(env, approval_timeout_seconds=3600)
+        await _await_state(handle, JobState.AWAITING_APPROVAL)
+        job = h.backend.jobs[inp.job_id]
+        qa_before = len(h.backend.qa_reports)
+        # What the hub does in the DB: new manifest version, new hash, job back to qa.
+        manifest = dict(job.manifest or {})
+        manifest["metadata"] = {**manifest["metadata"], "title": "Edited title"}
+        h.backend.transition(inp.job_id, JobState.QA, actor="hub:approver1")
+        job.manifest, job.content_hash = manifest, content_hash(manifest)
+        await handle.signal(
+            VideoJobWorkflow.hub_decision, HubDecision("edit", "approver1", job.content_hash)
+        )
+        await _await_state(handle, JobState.AWAITING_APPROVAL)
+        for _ in range(100):
+            if h.backend.get_state(inp.job_id) == JobState.AWAITING_APPROVAL:
+                break
+            await asyncio.sleep(0.05)
+        assert len(h.backend.qa_reports) == qa_before + 1  # QA re-ran on the edit
+        assert h.backend.approvals == {}  # the edit approved nothing
+        token = h.token(inp)  # approve the EDITED content
+        h.backend.verify_approval(inp.job_id, token, actor="hub:approver1")
+        await handle.signal(
+            VideoJobWorkflow.hub_decision,
+            HubDecision("approve", "approver1", job.content_hash, token=token),
+        )
+        result = await handle.result()
+    assert result.final_state == JobState.LIVE.value
+    assert result.content_hash == job.content_hash
+    assert h.client.uploads[0][1].title == "Edited title"
+
+
+async def test_hub_reject_for_rework_reproduces_then_waits_again(
+    env: WorkflowEnvironment,
+) -> None:
+    from ytcore.workflow.models import HubDecision
+
+    h = Harness()
+    async with h.worker(env):
+        handle, inp = await h.start(env, approval_timeout_seconds=3600)
+        await _await_state(handle, JobState.AWAITING_APPROVAL)
+        chash = h.backend.jobs[inp.job_id].content_hash or ""
+        await handle.signal(
+            VideoJobWorkflow.hub_decision,
+            HubDecision("reject", "approver1", chash, rework_stage="script", reason="weak hook"),
+        )
+        result = await handle.result()  # re-produced, then the deadline passes unapproved
+    states = [s for j, s, _ in h.backend.events if j == inp.job_id]
+    assert states.count("scripting") == 2 and states.count("awaiting_approval") == 2
+    assert result.final_state == JobState.CANCELLED.value
+    assert h.client.uploads == []
+
+
+async def test_hub_reject_discard_is_final(env: WorkflowEnvironment) -> None:
+    from ytcore.workflow.models import HubDecision
+
+    h = Harness()
+    async with h.worker(env):
+        handle, inp = await h.start(env)
+        await _await_state(handle, JobState.AWAITING_APPROVAL)
+        chash = h.backend.jobs[inp.job_id].content_hash or ""
+        await handle.signal(
+            VideoJobWorkflow.hub_decision,
+            HubDecision("reject", "approver1", chash, rework_stage="discard", reason="off brand"),
+        )
+        result = await handle.result()
+    assert result.final_state == JobState.REJECTED.value
+    assert h.client.uploads == []

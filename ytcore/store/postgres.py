@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from datetime import datetime
 from typing import Any
 
 import psycopg
@@ -135,13 +136,20 @@ class PostgresStore:
             if cur.rowcount != 1:
                 raise JobNotFound(job_id)
 
-    def submit_for_approval(self, job_id: str, manifest: dict[str, Any], *, actor: str) -> str:
+    def submit_for_approval(
+        self,
+        job_id: str,
+        manifest: dict[str, Any],
+        *,
+        actor: str,
+        deadline: datetime | None = None,
+    ) -> str:
         chash = content_hash(manifest)
         with self._tx(actor) as conn:
             cur = conn.execute(
                 "UPDATE video_jobs SET manifest = %s, content_hash = %s, "
-                "state = 'awaiting_approval' WHERE id = %s",
-                (Jsonb(manifest), chash, job_id),
+                "state = 'awaiting_approval', approval_deadline = %s WHERE id = %s",
+                (Jsonb(manifest), chash, deadline, job_id),
             )
             if cur.rowcount != 1:
                 raise JobNotFound(job_id)
@@ -193,6 +201,51 @@ class PostgresStore:
         if row is None:
             raise StoreError(f"unknown channel {channel_id}")
         return str(row[0])
+
+    def approval_on_record(self, job_id: str, token: str) -> ApprovalClaims | None:
+        """Claims if this exact token was already consumed for the job's CURRENT content and the
+        job is approved or later (the hub records approvals before signalling the workflow)."""
+        with self._tx("reader") as conn:
+            row = self._one(
+                conn,
+                "SELECT channel_id, content_hash, state FROM video_jobs WHERE id = %s",
+                (job_id,),
+            )
+            if row is None or row[1] is None:
+                return None
+            try:
+                claims = self._verifier.verify(
+                    token, job_id=job_id, channel_id=row[0], content_hash=row[1]
+                )
+            except ApprovalError:
+                return None
+            recorded = self._one(
+                conn,
+                "SELECT 1 FROM approvals WHERE token_jti = %s AND job_id = %s "
+                "AND content_hash = %s AND revoked_at IS NULL",
+                (claims.jti, job_id, row[1]),
+            )
+        approved_or_later = {"approved", "scheduled", "publishing", "published", "live"}
+        return claims if recorded and row[2] in approved_or_later else None
+
+    def record_qa(
+        self,
+        job_id: str,
+        *,
+        passed: bool,
+        risk_score: int,
+        flags: list[dict[str, Any]],
+        sources: list[dict[str, Any]],
+        actor: str,
+    ) -> None:
+        with self._tx(actor) as conn:
+            cur = conn.execute(
+                "INSERT INTO qa_reports (job_id, content_hash, passed, risk_score, flags, sources)"
+                " SELECT id, content_hash, %s, %s, %s, %s FROM video_jobs WHERE id = %s",
+                (passed, risk_score, Jsonb(flags), Jsonb(sources), job_id),
+            )
+            if cur.rowcount != 1:
+                raise JobNotFound(job_id)
 
     def record_cost(self, job_id: str, kind: str, cost_cents: int, *, actor: str) -> None:
         with self._tx(actor) as conn:

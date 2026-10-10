@@ -14,6 +14,7 @@ import json
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Protocol
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
@@ -22,6 +23,12 @@ from ytcore.approvals.hashing import canonical_json, is_content_hash
 
 TOKEN_VERSION = 1
 MAX_TTL = timedelta(hours=72)
+
+
+class _Signs(Protocol):
+    def sign(self, data: bytes) -> bytes: ...
+
+    def public_key(self) -> Ed25519PublicKey: ...
 
 
 class ApprovalError(Exception):
@@ -83,10 +90,14 @@ def _b64d(text: str) -> bytes:
 
 
 class ApprovalSigner:
-    """Approval hub only. Never construct this in the gateway or any agent."""
+    """Approval hub only. Never construct this in the gateway, workers or agents.
 
-    def __init__(self, private_key: Ed25519PrivateKey) -> None:
-        self._key = private_key
+    Takes a KeyProvider (ytcore/approvals/keys.py) or, in tests, an Ed25519PrivateKey; both
+    expose sign() and public_key().
+    """
+
+    def __init__(self, key: Ed25519PrivateKey | _Signs) -> None:
+        self._key = key
 
     def public_key(self) -> Ed25519PublicKey:
         return self._key.public_key()

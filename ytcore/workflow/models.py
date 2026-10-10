@@ -32,6 +32,21 @@ class QAReport:
     passed: bool
     rework_stage: str | None = None  # "scripting" | "rendering" when not passed
     notes: str = ""
+    risk_score: int = 0  # 0..100; the approval hub sorts and fast-lanes by it
+    flags: list[dict[str, str]] = field(default_factory=list)  # flagged claims (untrusted data)
+    sources: list[dict[str, str]] = field(default_factory=list)  # cited sources (untrusted data)
+
+
+@dataclass(frozen=True)
+class HubDecision:
+    """Signal from the approval hub. The hub has already written the DB side of the decision."""
+
+    action: str  # approve | edit | reject
+    actor: str
+    content_hash: str
+    token: str | None = None  # approve: token already consumed by the hub
+    rework_stage: str | None = None  # reject: research | script | render | discard
+    reason: str = ""
 
 
 @dataclass(frozen=True)

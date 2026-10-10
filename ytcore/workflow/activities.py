@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 from temporalio import activity
@@ -46,9 +47,31 @@ class Backend(Protocol):
 
     def transition(self, job_id: str, to_state: JobState, *, actor: str) -> None: ...
 
-    def submit_for_approval(self, job_id: str, manifest: dict[str, Any], *, actor: str) -> str:
+    def submit_for_approval(
+        self,
+        job_id: str,
+        manifest: dict[str, Any],
+        *,
+        actor: str,
+        deadline: datetime | None = None,
+    ) -> str:
         """Store the manifest, set its content hash and move to awaiting_approval."""
         ...
+
+    def approval_on_record(self, job_id: str, token: str) -> ApprovalClaims | None:
+        """Claims if the approval hub already consumed this token for the current content."""
+        ...
+
+    def record_qa(
+        self,
+        job_id: str,
+        *,
+        passed: bool,
+        risk_score: int,
+        flags: list[dict[str, Any]],
+        sources: list[dict[str, Any]],
+        actor: str,
+    ) -> None: ...
 
     def verify_approval(self, job_id: str, token: str, *, actor: str) -> ApprovalClaims:
         """Verify with the PUBLIC key, consume the jti and approve, atomically."""
@@ -102,10 +125,27 @@ class JobActivities:
 
     @activity.defn
     async def run_qa(self, job_id: str, channel_id: str) -> QAReport:
-        return QAReport(passed=True)
+        # Placeholder for the QA agent pool: fake report with a low risk score.
+        report = QAReport(passed=True, risk_score=10)
+        await asyncio.to_thread(
+            self._backend.record_qa,
+            job_id,
+            passed=report.passed,
+            risk_score=report.risk_score,
+            flags=list(report.flags),
+            sources=list(report.sources),
+            actor=ACTOR,
+        )
+        return report
 
     @activity.defn
-    async def seal_package(self, job_id: str, channel_id: str, artifacts: dict[str, str]) -> str:
+    async def seal_package(
+        self,
+        job_id: str,
+        channel_id: str,
+        artifacts: dict[str, str],
+        approval_timeout_seconds: int = 48 * 3600,
+    ) -> str:
         """Freeze the publish package and submit it for human approval."""
         assets = dict(artifacts)
         manifest = {
@@ -123,8 +163,9 @@ class JobActivities:
             },
             "assets": assets,
         }
+        deadline = datetime.now(UTC) + timedelta(seconds=approval_timeout_seconds)
         return await asyncio.to_thread(
-            self._backend.submit_for_approval, job_id, manifest, actor=ACTOR
+            self._backend.submit_for_approval, job_id, manifest, actor=ACTOR, deadline=deadline
         )
 
     @activity.defn
@@ -135,7 +176,12 @@ class JobActivities:
                 self._backend.verify_approval, job_id, token, actor=ACTOR
             )
         except (ApprovalInvalid, ApprovalReplayError, ApprovalGateError) as exc:
-            raise _non_retryable(exc, "ApprovalRejected") from exc
+            # The approval hub consumes the token and approves before signalling; accept that
+            # exact token for the current content, and nothing else.
+            recorded = await asyncio.to_thread(self._backend.approval_on_record, job_id, token)
+            if recorded is None:
+                raise _non_retryable(exc, "ApprovalRejected") from exc
+            claims = recorded
         return claims.approver
 
     @activity.defn

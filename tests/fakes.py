@@ -79,6 +79,7 @@ class FakeJob:
     content_hash: str | None = None
     manifest: dict[str, Any] | None = None
     render_cost_cents: int = 0
+    approval_deadline: datetime | None = None
 
 
 @dataclass
@@ -99,6 +100,7 @@ class FakeBackend:
         self.quota_used: dict[str, int] = {}
         self.costs_today: dict[str, int] = {}
         self.events: list[tuple[str, str, str]] = []  # (job_id, to_state, actor)
+        self.qa_reports: list[tuple[str, bool, int]] = []
 
     # ---------------------------------------------------------------- setup helpers
 
@@ -153,9 +155,17 @@ class FakeBackend:
         job.state = to_state
         self.events.append((job_id, to_state.value, actor))
 
-    def submit_for_approval(self, job_id: str, manifest: dict[str, Any], *, actor: str) -> str:
+    def submit_for_approval(
+        self,
+        job_id: str,
+        manifest: dict[str, Any],
+        *,
+        actor: str,
+        deadline: datetime | None = None,
+    ) -> str:
         job = self._job(job_id)
         job.manifest, job.content_hash = manifest, content_hash(manifest)
+        job.approval_deadline = deadline
         self.transition(job_id, JobState.AWAITING_APPROVAL, actor=actor)
         return job.content_hash
 
@@ -175,6 +185,37 @@ class FakeBackend:
         self.approvals[claims.jti] = FakeApproval(job_id, job.content_hash, claims.expires_at)
         self.transition(job_id, JobState.APPROVED, actor=f"approver:{claims.approver}")
         return claims
+
+    def approval_on_record(self, job_id: str, token: str) -> ApprovalClaims | None:
+        job = self._job(job_id)
+        try:
+            claims = self._verifier.verify(
+                token, job_id=job_id, channel_id=job.channel_id, content_hash=job.content_hash or ""
+            )
+        except ApprovalError:
+            return None
+        a = self.approvals.get(claims.jti)
+        approved = {
+            JobState.APPROVED,
+            JobState.SCHEDULED,
+            JobState.PUBLISHING,
+            JobState.PUBLISHED,
+            JobState.LIVE,
+        }
+        ok = a is not None and a.job_id == job_id and a.content_hash == job.content_hash
+        return claims if ok and job.state in approved else None
+
+    def record_qa(
+        self,
+        job_id: str,
+        *,
+        passed: bool,
+        risk_score: int,
+        flags: list[dict[str, Any]],
+        sources: list[dict[str, Any]],
+        actor: str,
+    ) -> None:
+        self.qa_reports.append((job_id, passed, risk_score))
 
     def record_cost(self, job_id: str, kind: str, cost_cents: int, *, actor: str) -> None:
         job = self._job(job_id)
