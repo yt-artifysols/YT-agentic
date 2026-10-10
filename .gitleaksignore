@@ -1,0 +1,2 @@
+# Dummy PEM canary in the red-team test, since rebuilt at runtime (no secret-shaped literal remains).
+b4328258df7b22a587efe9e6e6c5345bc5e16015:tests/redteam/test_secrets_and_assets.py:private-key:31
