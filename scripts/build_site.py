@@ -45,6 +45,14 @@ PHASES = [
         "psycopg store with typed trigger errors, single publish path through the gateway, "
         "quota ledger, uploads with idempotency, budget enforcement, full audit trail.",
     ),
+    (
+        "Phase 1B",
+        "Approval hub (API and UI)",
+        "done",
+        "FastAPI hub issuing Ed25519 tokens via a KeyProvider, passkey sign-in, roles, CSRF, "
+        "rate limits; approve/edit/reject/fast-lane batch; kill switches; Next.js UI with "
+        "risk-sorted queue, preview, flags, sources and diff view.",
+    ),
 ]
 
 INVARIANTS = [

@@ -91,6 +91,65 @@ jobs:
       - name: Dependency audit
         run: make audit
 
+  ui:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui/hub
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/hub/package-lock.json
+      - run: npm ci --no-fund
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Build
+        run: npx next build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+      - name: Dependency audit
+        run: npm audit --omit=dev
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: [ui]
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: ytcore
+          POSTGRES_PASSWORD: ytcore-ci  # gitleaks:allow (ephemeral CI container)
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ytcore" --health-interval 2s
+          --health-timeout 3s --health-retries 30
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: ytcore
+      PGPASSWORD: ytcore-ci  # gitleaks:allow (ephemeral CI container)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv venv .venv --python 3.12 && uv pip install -p .venv -e '.[dev,hub,youtube]'
+      - name: Install psql
+        run: sudo apt-get update -q && sudo apt-get install -y -q postgresql-client
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/hub/package-lock.json
+      - run: npm ci --no-fund
+        working-directory: ui/hub
+      - run: npx playwright install --with-deps chromium
+        working-directory: ui/hub
+      - name: UI end-to-end (passkey, approve/edit/reject, kill switch) + DB verification
+        run: make test-e2e
+
   terraform:
     runs-on: ubuntu-latest
     steps:

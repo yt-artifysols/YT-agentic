@@ -26,6 +26,12 @@ render and QA; a HUMAN approval is mandatory before anything is published.
   (default) and `RealYouTubeClient` (`youtube` extra; production only)
 - `ytcore/db/migrations` – numbered, immutable; `002_transitions_seed.sql` is generated and
   repeatable (`-- repeatable`)
+- `ytcore/approvals/service` – approval hub API (FastAPI): the ONLY place tokens are issued;
+  passkeys (py_webauthn), roles approver/operator/admin, CSRF, rate limits, audit; OpenAPI spec
+  committed (`cli export-openapi --check`)
+- `ytcore/approvals/keys.py` – KeyProvider (dev key file / KMS); only the hub may import it
+- `ui/hub` – Next.js approval UI; `ui/hub/e2e` – full-stack Playwright test with a virtual
+  passkey (`make test-e2e`)
 - `tests/fakes.py` – `FakeBackend` mirroring DB rules; `tests/integration` – real Postgres
 
 ## Commands

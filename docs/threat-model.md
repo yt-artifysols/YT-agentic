@@ -33,7 +33,7 @@ changes.
 | # | Threat | Mitigations |
 |---|---|---|
 | 1 | **Stolen OAuth refresh token** | Tokens only in the secrets manager, one per channel, readable only by the gateway service account; never in code, logs, prompts or tests (`SecretValue` masks repr; gitleaks in CI and pre-commit); revoke and rotate per channel; alerts on uploads with no matching audit event. |
-| 2 | **Forged approval** | Ed25519 tokens signed only by the approval hub; the gateway holds only the public key; tokens bound to job, channel and content hash, expire within 72h and are single use; DB gate requires a matching non-revoked, unexpired approval row; approvals append-only. |
+| 2 | **Forged approval** | Passkey (WebAuthn) sign-in with user verification, approver role, CSRF + same-origin checks, stale-preview refusal (hash re-check); Ed25519 tokens signed only by the approval hub through a KMS-backed KeyProvider; the gateway holds only the public key; tokens bound to job, channel and content hash, expire within 72h and are single use; DB gate requires a matching non-revoked, unexpired approval row; approvals append-only. |
 | 3 | **Prompt injection via sources** | External content is wrapped and passed as data, never instructions; agents have no publish capability; any output goes through QA and human approval; agents cannot edit approved knowledge. |
 | 4 | **Malicious media** (crafted files exploiting decoders) | Media processed in sandboxed, network-restricted workers; type/size validation; content hashing; no media processing in the approval hub or gateway. |
 | 5 | **Quota exhaustion** (YouTube API, LLM spend) | Per-channel budgets and caps on event-triggered jobs; gateway as a single quota choke point; alerts and kill switches; retries with backoff and caps. |
@@ -47,4 +47,6 @@ changes.
 
 - Approval key rotation (key id claim) is not implemented yet.
 - Kill switches and per-channel budgets exist as design only; implement in later phases.
-- The approval hub UI needs MFA-backed operator identity.
+- Approval hub identity is passkey-based (ADR 0006); recovery for lost passkeys is an admin
+  re-invite and must stay a manual, audited step.
+- Hub WebAuthn challenges and rate limits are in-process (single instance) for now.

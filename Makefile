@@ -9,7 +9,7 @@ export PGUSER ?= ytcore
 export PGPASSWORD ?= ytcore-dev
 
 .PHONY: setup lint format typecheck test test-db test-integration test-all check-generated check-migrations \
-        audit secrets-scan up down tf-validate site
+        audit secrets-scan up down tf-validate site ui-check test-e2e hub
 
 setup:
 	uv venv .venv
@@ -64,3 +64,16 @@ tf-validate:
 # Static development-status page (deployed by Vercel from site/, see vercel.json).
 site:
 	$(PY) scripts/build_site.py
+
+# Approval hub UI (Next.js): install, typecheck, build, dependency audit.
+ui-check:
+	cd ui/hub && npm ci --no-fund && npx tsc --noEmit && NEXT_TELEMETRY_DISABLED=1 npx next build && npm audit --omit=dev
+
+# Full UI end-to-end run (Postgres from PG*, Temporal dev server, worker, hub API, Playwright
+# with a virtual passkey) followed by database verification.
+test-e2e:
+	PYTHON=$(abspath $(PY)) ui/hub/e2e/run.sh
+
+# Run the hub API locally (dev key from `python -m ytcore.approvals.service.cli gen-dev-key`).
+hub:
+	$(PY) -m uvicorn ytcore.approvals.service.main:app --port 8001
