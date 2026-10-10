@@ -27,6 +27,8 @@ jobs:
         run: make typecheck
       - name: Transitions seed matches states.py
         run: make check-generated
+      - name: Dashboards and alert rules match the code
+        run: make check-observability
       - name: Applied migrations unchanged vs main
         run: |
           git fetch --no-tags origin main || true
@@ -73,6 +75,8 @@ jobs:
         run: make test-db
       - name: Pipeline and gateway integration tests (real Postgres)
         run: make test-integration
+      - name: Backup and restore drill
+        run: make restore-drill
 
   security:
     runs-on: ubuntu-latest

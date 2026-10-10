@@ -9,7 +9,7 @@ export PGUSER ?= ytcore
 export PGPASSWORD ?= ytcore-dev
 
 .PHONY: setup lint format typecheck test test-db test-integration test-all check-generated check-migrations \
-        audit secrets-scan up down tf-validate site ui-check test-e2e hub evals redteam
+        audit secrets-scan up down tf-validate site ui-check test-e2e hub evals redteam restore-drill check-observability
 
 setup:
 	uv venv .venv
@@ -53,7 +53,14 @@ evals:
 redteam:
 	$(PY) -m pytest -q tests/redteam
 
-test-all: lint typecheck check-generated check-migrations test evals test-db test-integration
+# Backup, restore into a scratch database/store and verify against the manifests.
+restore-drill:
+	PYTHON=$(PY) scripts/restore_drill.sh
+
+check-observability:
+	$(PY) -m ytcore.observability.dashboards --check
+
+test-all: lint typecheck check-generated check-observability check-migrations test evals test-db test-integration restore-drill
 
 audit:
 	$(PY) -m pip_audit --skip-editable
