@@ -19,6 +19,10 @@ READS = {
     "/api/jobs",
     "/api/jobs/{job_id}",
     "/api/jobs/{job_id}/assets/{name}",
+    "/api/knowledge/drafts",
+    "/api/knowledge/drafts/{doc_id}",
+    "/api/channels/{channel_id}/knowledge",
+    "/api/channels/{channel_id}/inputs",
 }
 
 
@@ -97,3 +101,26 @@ def test_production_hub_settings_refuse_dev_shortcuts(field: str, value: object)
     HubSettings(**ok)
     with pytest.raises(ValidationError):
         HubSettings(**{**ok, field: value})
+
+
+@pytest.mark.parametrize(
+    "path", ["/api/knowledge/drafts/{doc_id}/approve", "/api/knowledge/drafts/{doc_id}/reject"]
+)
+def test_knowledge_decisions_require_the_draft_hash_the_reviewer_saw(path: str) -> None:
+    ref = SPEC["paths"][path]["post"]["requestBody"]["content"]["application/json"]["schema"]
+    schema = SPEC["components"]["schemas"][ref["$ref"].split("/")[-1]]
+    assert "content_sha256" in schema["required"]
+    assert schema["properties"]["content_sha256"]["pattern"] == "^sha256:[0-9a-f]{64}$"
+
+
+def test_knowledge_approval_lives_only_in_the_hub() -> None:
+    """Agents and the knowledge package have no way to approve knowledge."""
+    for path in [*(ROOT / "ytcore" / "knowledge").rglob("*.py"),
+                 *(ROOT / "ytcore" / "agents").rglob("*.py")]:  # fmt: skip
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                assert not node.module.startswith("ytcore.approvals.service"), path
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                assert "UPDATE knowledge_docs" not in node.value, path
+                assert "approved_by = " not in node.value, path

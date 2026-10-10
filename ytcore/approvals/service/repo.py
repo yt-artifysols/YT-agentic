@@ -13,6 +13,8 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from ytcore.approvals.hashing import content_hash
+from ytcore.knowledge.models import KnowledgeDoc
+from ytcore.knowledge.store import doc_from_row
 from ytcore.store.errors import StoreError
 from ytcore.store.postgres import Connect, map_db_error
 
@@ -280,6 +282,83 @@ class HubRepository:
                 )
             except psycopg.errors.CheckViolation as exc:
                 raise HubConflict(exc.diag.message_primary or "rejection refused") from exc
+
+    # ------------------------------------------------------------------ knowledge (hub only)
+
+    _KB_COLS = (
+        "id::text, channel_id, kind, version, content, content_sha256, status, proposed_by, "
+        "base_version, proposed_at, approved_by, approved_at, rejected_by, reject_reason"
+    )
+
+    def knowledge_drafts(self, channel: str | None = None) -> list[KnowledgeDoc]:
+        with self._tx("hub:reader") as conn:
+            rows = self._all(
+                conn,
+                f"SELECT {self._KB_COLS} FROM knowledge_docs WHERE status = 'draft' "  # noqa: S608
+                "AND (%s::text IS NULL OR channel_id = %s) ORDER BY proposed_at, id",
+                (channel, channel),
+            )
+        return [doc_from_row(r) for r in rows]
+
+    def knowledge_doc(self, doc_id: str) -> KnowledgeDoc | None:
+        with self._tx("hub:reader") as conn:
+            row = self._one(
+                conn,
+                f"SELECT {self._KB_COLS} FROM knowledge_docs WHERE id::text = %s",  # noqa: S608
+                (doc_id,),
+            )
+        return doc_from_row(row) if row else None
+
+    def knowledge_version(self, channel: str, kind: str, version: int) -> KnowledgeDoc | None:
+        with self._tx("hub:reader") as conn:
+            row = self._one(
+                conn,
+                f"SELECT {self._KB_COLS} FROM knowledge_docs "  # noqa: S608
+                "WHERE channel_id = %s AND kind = %s AND version = %s",
+                (channel, kind, version),
+            )
+        return doc_from_row(row) if row else None
+
+    def knowledge_current(self, channel: str) -> list[KnowledgeDoc]:
+        with self._tx("hub:reader") as conn:
+            rows = self._all(
+                conn,
+                f"SELECT DISTINCT ON (kind) {self._KB_COLS} FROM knowledge_docs "  # noqa: S608
+                "WHERE channel_id = %s AND status = 'approved' ORDER BY kind, version DESC",
+                (channel,),
+            )
+        return [doc_from_row(r) for r in rows]
+
+    def decide_knowledge(
+        self, doc_id: str, expected_sha256: str, *, username: str, approve: bool, reason: str = ""
+    ) -> KnowledgeDoc:
+        """Approve or reject a draft as a human approver. The DB re-checks the approver's role,
+        that the draft is still a draft and that it is based on the current approved version."""
+        with self._tx(f"hub:{username}") as conn:
+            row = self._one(
+                conn,
+                "SELECT status, content_sha256 FROM knowledge_docs WHERE id::text = %s FOR UPDATE",
+                (doc_id,),
+            )
+            if row is None:
+                raise HubConflict("knowledge draft not found")
+            if row[0] != "draft" or row[1] != expected_sha256:
+                raise HubConflict("draft changed or was already decided")
+            if approve:
+                sql = (
+                    "UPDATE knowledge_docs SET status = 'approved', approved_by = %s, "  # noqa: S608
+                    f"approved_at = now() WHERE id::text = %s RETURNING {self._KB_COLS}"
+                )
+                params: tuple[Any, ...] = (username, doc_id)
+            else:
+                sql = (
+                    "UPDATE knowledge_docs SET status = 'rejected', rejected_by = %s, "  # noqa: S608
+                    "rejected_at = now(), reject_reason = %s WHERE id::text = %s "
+                    f"RETURNING {self._KB_COLS}"
+                )
+                params = (username, reason, doc_id)
+            updated = self._one(conn, sql, params)
+        return doc_from_row(updated)
 
     # ------------------------------------------------------------------ kill switches
 

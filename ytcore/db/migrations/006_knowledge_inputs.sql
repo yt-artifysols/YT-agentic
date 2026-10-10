@@ -182,7 +182,7 @@ CREATE TABLE owner_inputs (
     id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     channel_id   text NOT NULL REFERENCES channels (id),
     kind         text NOT NULL CHECK (kind IN ('idea', 'footage', 'note', 'goal')),
-    uri          text CHECK (uri ~ '^(file|gs|s3|https)://[^\s]{1,2000}$'),
+    uri          text CHECK (uri ~ '^(file|gs|s3|https)://[^\s]+$' AND length(uri) <= 2000),
     body         text CHECK (length(body) BETWEEN 1 AND 20000),
     sha256       text NOT NULL CHECK (sha256 ~ '^sha256:[0-9a-f]{64}$'),
     status       text NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'used', 'archived')),

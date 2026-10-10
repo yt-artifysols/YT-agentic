@@ -15,6 +15,9 @@ dependencies = [
   "temporalio>=1.8",
 ]
 
+[project.scripts]
+ytctl = "ytcore.cli:main"
+
 [project.optional-dependencies]
 hub = [
   "fastapi>=0.115",

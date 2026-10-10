@@ -22,6 +22,8 @@ from ytcore.approvals.service.settings import HubSettings
 from ytcore.approvals.service.signals import FakeSignaler, TemporalSignaler, WorkflowSignaler
 from ytcore.approvals.token import ApprovalSigner, ApprovalVerifier
 from ytcore.gateway.assets import AssetSource, InMemoryAssetSource
+from ytcore.inputs.store import PostgresInputs
+from ytcore.knowledge.store import PostgresKnowledge
 from ytcore.store.postgres import PostgresStore
 from ytcore.workflow.models import HubDecision
 
@@ -89,6 +91,8 @@ def create_hub_app(
         sessions=SessionManager(repo, settings),
         ceremonies=CeremonyStore(),
         limiter=RateLimiter(),
+        inputs=PostgresInputs.from_conninfo(conninfo),
+        knowledge=PostgresKnowledge.from_conninfo(conninfo),
     )
     return create_app(deps)
 

@@ -29,7 +29,7 @@ from webauthn.helpers.structs import (
 )
 
 from ytcore.approvals.service.hub import ApprovalHub, HubError
-from ytcore.approvals.service.repo import Credential, HubRepository, User, sha256
+from ytcore.approvals.service.repo import Credential, HubConflict, HubRepository, User, sha256
 from ytcore.approvals.service.security import (
     CEREMONY_COOKIE,
     AuthContext,
@@ -42,6 +42,16 @@ from ytcore.approvals.service.security import (
 )
 from ytcore.approvals.service.settings import HubSettings
 from ytcore.gateway.assets import AssetSource, read_verified
+from ytcore.inputs.models import InputKind, OwnerInput
+from ytcore.inputs.store import InputStore
+from ytcore.knowledge.diff import line_diff
+from ytcore.knowledge.models import KnowledgeDoc, KnowledgeKind
+from ytcore.store.errors import (
+    InputRejected,
+    KnowledgeForbidden,
+    KnowledgeStale,
+    StoreError,
+)
 
 # ----------------------------------------------------------------------------- schemas
 
@@ -192,6 +202,104 @@ class Ok(BaseModel):
     ok: bool = True
 
 
+Sha256 = Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
+KnowledgeKindName = Literal[
+    "brand_voice", "offers", "playbook", "hook_library", "banned_claims", "style_guide", "policy"
+]
+
+
+class KnowledgeDocOut(BaseModel):
+    id: str
+    channel_id: str
+    kind: str
+    version: int
+    base_version: int | None
+    status: str
+    content_sha256: str
+    proposed_by: str
+    proposed_at: datetime | None
+    approved_by: str | None
+    approved_at: datetime | None
+
+
+class DiffLineOut(BaseModel):
+    op: Literal["equal", "add", "remove"]
+    text: str
+
+
+class KnowledgeDraftOut(KnowledgeDocOut):
+    content: str
+    base_content: str | None
+    current_version: int | None
+    stale: bool
+    diff: list[DiffLineOut]
+
+
+class KnowledgeProposeIn(BaseModel):
+    kind: KnowledgeKindName
+    content: str = Field(min_length=1, max_length=100_000)
+    base_version: int | None = Field(default=None, gt=0)
+
+
+class KnowledgeDecisionIn(BaseModel):
+    content_sha256: Sha256
+
+
+class KnowledgeRejectIn(KnowledgeDecisionIn):
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class OwnerInputIn(BaseModel):
+    kind: Literal["idea", "footage", "note", "goal"]
+    body: str | None = Field(default=None, min_length=1, max_length=20_000)
+    uri: str | None = Field(default=None, max_length=2000)
+    sha256: Sha256 | None = None
+
+
+class OwnerInputOut(BaseModel):
+    id: str
+    channel_id: str
+    kind: str
+    uri: str | None
+    body: str | None
+    sha256: str
+    status: str
+    submitted_by: str
+    used_by_job: str | None
+    created_at: datetime | None
+
+
+def _doc_out(d: KnowledgeDoc) -> dict[str, Any]:
+    return {
+        "id": d.id,
+        "channel_id": d.channel_id,
+        "kind": str(d.kind),
+        "version": d.version,
+        "base_version": d.base_version,
+        "status": d.status,
+        "content_sha256": d.content_sha256,
+        "proposed_by": d.proposed_by,
+        "proposed_at": d.proposed_at,
+        "approved_by": d.approved_by,
+        "approved_at": d.approved_at,
+    }
+
+
+def _input_out(i: OwnerInput) -> OwnerInputOut:
+    return OwnerInputOut(
+        id=i.id,
+        channel_id=i.channel_id,
+        kind=str(i.kind),
+        uri=i.uri,
+        body=i.body,
+        sha256=i.sha256,
+        status=i.status,
+        submitted_by=i.submitted_by,
+        used_by_job=i.used_by_job,
+        created_at=i.created_at,
+    )
+
+
 # ----------------------------------------------------------------------------- app
 
 
@@ -204,6 +312,8 @@ class HubDeps:
     sessions: SessionManager
     ceremonies: CeremonyStore
     limiter: RateLimiter
+    inputs: InputStore | None = None
+    knowledge: Any = None  # channel-bound knowledge repositories (proposals only)
 
 
 def create_app(deps: HubDeps) -> FastAPI:
@@ -606,6 +716,139 @@ def create_app(deps: HubDeps) -> FastAPI:
         return InviteOut(username=user.username, invite_token=token, expires_at=expires)
 
     app.include_router(api)
+
+    # ------------------------------------------------------------------ knowledge base
+
+    kb = APIRouter(prefix="/api", tags=["knowledge"])
+
+    def store_error(exc: StoreError) -> HTTPException:
+        if isinstance(exc, KnowledgeForbidden):
+            return HTTPException(403, str(exc))
+        if isinstance(exc, KnowledgeStale | HubConflict):
+            return HTTPException(409, str(exc))
+        if isinstance(exc, InputRejected):
+            return HTTPException(400, str(exc))
+        return HTTPException(400, "request refused by a data rule")
+
+    async def draft_out(doc: KnowledgeDoc) -> KnowledgeDraftOut:
+        base = (
+            await asyncio.to_thread(
+                deps.repo.knowledge_version, doc.channel_id, str(doc.kind), doc.base_version
+            )
+            if doc.base_version
+            else None
+        )
+        current = [
+            d
+            for d in await asyncio.to_thread(deps.repo.knowledge_current, doc.channel_id)
+            if d.kind == doc.kind
+        ]
+        current_version = current[0].version if current else None
+        return KnowledgeDraftOut(
+            **_doc_out(doc),
+            content=doc.content,
+            base_content=base.content if base else None,
+            current_version=current_version,
+            stale=doc.status == "draft" and doc.base_version != current_version,
+            diff=[DiffLineOut(**d) for d in line_diff(base.content if base else "", doc.content)],
+        )
+
+    @kb.get("/knowledge/drafts", response_model=list[KnowledgeDocOut], dependencies=[read_limit])
+    async def knowledge_drafts(ctx: Session, channel: str | None = None) -> list[KnowledgeDocOut]:
+        docs = await asyncio.to_thread(deps.repo.knowledge_drafts, channel)
+        return [KnowledgeDocOut(**_doc_out(d)) for d in docs]
+
+    @kb.get("/knowledge/drafts/{doc_id}", response_model=KnowledgeDraftOut,
+            dependencies=[read_limit])  # fmt: skip
+    async def knowledge_draft(doc_id: str, ctx: Session) -> KnowledgeDraftOut:
+        doc = await asyncio.to_thread(deps.repo.knowledge_doc, doc_id)
+        if doc is None:
+            raise HTTPException(404, "knowledge draft not found")
+        return await draft_out(doc)
+
+    @kb.post("/knowledge/drafts/{doc_id}/approve", response_model=KnowledgeDocOut,
+             dependencies=[write_limit])  # fmt: skip
+    async def knowledge_approve(
+        doc_id: str, body: KnowledgeDecisionIn, ctx: Session
+    ) -> KnowledgeDocOut:
+        user = require_role(ctx, "approver")
+        try:
+            doc = await asyncio.to_thread(
+                deps.repo.decide_knowledge, doc_id, body.content_sha256,
+                username=user.username, approve=True,
+            )  # fmt: skip
+        except StoreError as exc:
+            raise store_error(exc) from exc
+        return KnowledgeDocOut(**_doc_out(doc))
+
+    @kb.post("/knowledge/drafts/{doc_id}/reject", response_model=KnowledgeDocOut,
+             dependencies=[write_limit])  # fmt: skip
+    async def knowledge_reject(
+        doc_id: str, body: KnowledgeRejectIn, ctx: Session
+    ) -> KnowledgeDocOut:
+        user = require_role(ctx, "approver")
+        try:
+            doc = await asyncio.to_thread(
+                deps.repo.decide_knowledge, doc_id, body.content_sha256,
+                username=user.username, approve=False, reason=body.reason,
+            )  # fmt: skip
+        except StoreError as exc:
+            raise store_error(exc) from exc
+        return KnowledgeDocOut(**_doc_out(doc))
+
+    @kb.get("/channels/{channel_id}/knowledge", response_model=list[KnowledgeDocOut],
+            dependencies=[read_limit])  # fmt: skip
+    async def knowledge_current(channel_id: str, ctx: Session) -> list[KnowledgeDocOut]:
+        docs = await asyncio.to_thread(deps.repo.knowledge_current, channel_id)
+        return [KnowledgeDocOut(**_doc_out(d)) for d in docs]
+
+    @kb.post("/channels/{channel_id}/knowledge", response_model=KnowledgeDocOut,
+             dependencies=[write_limit])  # fmt: skip
+    async def knowledge_propose(
+        channel_id: str, body: KnowledgeProposeIn, ctx: Session
+    ) -> KnowledgeDocOut:
+        """Submit a draft. Drafts never take effect until an approver approves them."""
+        user = require_role(ctx, "approver", "operator", "admin")
+        if deps.knowledge is None:
+            raise HTTPException(503, "knowledge store not configured")
+        try:
+            doc = await asyncio.to_thread(
+                deps.knowledge.channel(channel_id).propose, KnowledgeKind(body.kind),
+                body.content, proposed_by=user.username, base_version=body.base_version,
+            )  # fmt: skip
+        except StoreError as exc:
+            raise store_error(exc) from exc
+        return KnowledgeDocOut(**_doc_out(doc))
+
+    # ------------------------------------------------------------------ owner inputs
+
+    @kb.get("/channels/{channel_id}/inputs", response_model=list[OwnerInputOut], tags=["inputs"],
+            dependencies=[read_limit])  # fmt: skip
+    async def list_inputs(
+        channel_id: str, ctx: Session, status: Literal["new", "used", "archived"] | None = None
+    ) -> list[OwnerInputOut]:
+        if deps.inputs is None:
+            raise HTTPException(503, "input store not configured")
+        items = await asyncio.to_thread(deps.inputs.list_for, channel_id, status)
+        return [_input_out(i) for i in items]
+
+    @kb.post("/channels/{channel_id}/inputs", response_model=OwnerInputOut, tags=["inputs"],
+             dependencies=[write_limit])  # fmt: skip
+    async def add_input(channel_id: str, body: OwnerInputIn, ctx: Session) -> OwnerInputOut:
+        """Submit an idea, footage reference, note or goal for the channel."""
+        user = require_role(ctx, "operator", "admin")
+        if deps.inputs is None:
+            raise HTTPException(503, "input store not configured")
+        try:
+            item = await asyncio.to_thread(
+                deps.inputs.add, channel_id, InputKind(body.kind), body=body.body,
+                uri=body.uri, sha256=body.sha256, submitted_by=user.username,
+            )  # fmt: skip
+        except StoreError as exc:
+            raise store_error(exc) from exc
+        return _input_out(item)
+
+    app.include_router(kb)
 
     @app.get("/api/healthz", include_in_schema=False)
     async def healthz() -> dict[str, str]:

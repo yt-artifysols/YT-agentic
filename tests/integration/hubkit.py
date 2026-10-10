@@ -19,6 +19,8 @@ from ytcore.approvals.service.security import CeremonyStore, RateLimiter, Sessio
 from ytcore.approvals.service.settings import HubSettings
 from ytcore.approvals.service.signals import FakeSignaler, WorkflowSignaler
 from ytcore.gateway.assets import InMemoryAssetSource
+from ytcore.inputs.store import PostgresInputs
+from ytcore.knowledge.store import PostgresKnowledge
 from ytcore.store.postgres import PostgresStore
 
 ORIGIN = "http://localhost:3000"
@@ -119,6 +121,8 @@ def build_hub(
             sessions=SessionManager(repo, settings),
             ceremonies=CeremonyStore(),
             limiter=RateLimiter(),
+            inputs=PostgresInputs.from_conninfo(conninfo),
+            knowledge=PostgresKnowledge.from_conninfo(conninfo),
         )
     )
     return Hub(settings, repo, store, keys, signaler, notifier, assets, app)
