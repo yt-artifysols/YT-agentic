@@ -300,7 +300,7 @@ class PostgresStore:
             google_project_id=row[9],
             credentials_ref=row[10],
             oauth_client_ref=row[11],
-            global_paused=bool(row[12]),
+            global_paused=row[12] is not False,
         )
 
     def approval_consumed(self, job_id: str, jti: str, chash: str) -> bool:

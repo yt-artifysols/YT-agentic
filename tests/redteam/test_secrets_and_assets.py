@@ -197,3 +197,34 @@ def test_gateway_refuses_hostile_bytes_that_match_the_approved_digest() -> None:
     with pytest.raises(PublishRefused, match="asset"):
         rig.service.publish(job, token)
     assert rig.client.uploads == []
+
+
+# ----------------------------------------------------------------------------- DoS
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "a-" * 150_000,
+        "x" * 400_000,
+        ("-----BEGIN " + "PRIVATE KEY-----") * 20_000,
+        "<script>" * 50_000,
+        "<title>" * 50_000,
+        "eyJ" + "a" * 300_000,
+    ],
+)
+def test_hostile_pages_cannot_stall_scrubbing_or_html_extraction(payload: str) -> None:
+    import time
+
+    from ytcore.agents.web import extract_text
+
+    start = time.perf_counter()
+    scrub(payload)
+    extract_text(payload)
+    assert time.perf_counter() - start < 5.0
+
+
+def test_secrets_are_still_found_in_long_documents_and_across_window_edges() -> None:
+    filler = "lorem ipsum " * 4_200  # ~50k chars: the secret straddles a scan window boundary
+    text = filler[:49_990] + CANARIES["anthropic"] + filler
+    assert CANARIES["anthropic"] not in scrub(text)

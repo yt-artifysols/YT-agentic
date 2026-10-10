@@ -245,6 +245,9 @@ class QAAgent(Agent):
             media=generated,
             embedder=safety.embedder,
         )
+        # Record BEFORE looking: of two concurrent near-identical jobs, at least the later one
+        # sees the other (find only returns other channels' rows).
+        safety.fingerprints.record(job_id=safety.job_id, channel_id=ctx.channel_id, fp=fingerprints)
         report = safety.fingerprints.find(
             job_id=safety.job_id,
             channel_id=ctx.channel_id,
@@ -258,7 +261,6 @@ class QAAgent(Agent):
             if severity == "block":
                 script_stage |= dup_stage == "scripting"
                 render_stage |= dup_stage == "rendering"
-        safety.fingerprints.record(job_id=safety.job_id, channel_id=ctx.channel_id, fp=fingerprints)
         flag("synthetic_media_disclosed", "info", "AI-produced; disclosed as synthetic media")
 
         # Brand voice (model-judged against the approved brand voice).

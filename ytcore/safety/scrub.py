@@ -33,15 +33,24 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
         ("slack-token", r"\bxox[abprs]-[A-Za-z0-9\-]{10,}", 0),
         ("slack-webhook", r"https://hooks\.slack\.com/services/[A-Za-z0-9/]{20,}", 0),
         ("stripe-key", r"\b[sr]k_(?:live|test)_[0-9a-zA-Z]{16,}", 0),
-        ("jwt", r"\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{5,}", 0),
+        (
+            "jwt",
+            r"\beyJ[A-Za-z0-9_\-]{10,2000}\.[A-Za-z0-9_\-]{10,2000}\.[A-Za-z0-9_\-]{5,2000}",
+            0,
+        ),
         (
             "private-key-block",
-            r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)",
+            r"-----BEGIN [A-Z ]{0,20}PRIVATE KEY-----[\s\S]{0,6000}?"
+            r"(?:-----END [A-Z ]{0,20}PRIVATE KEY-----|$)",
             0,
         ),
         ("bearer-token", r"\bBearer\s+[A-Za-z0-9._~+/\-]{20,}=*", re.I),
         # Our approval tokens: base64url(claims).base64url(signature).
-        ("approval-token", r"\b[A-Za-z0-9_\-]{40,}\.[A-Za-z0-9_\-]{40,}\b", 0),
+        (
+            "approval-token",
+            r"(?<![A-Za-z0-9_\-])[A-Za-z0-9_\-]{40,512}\.[A-Za-z0-9_\-]{40,512}(?![A-Za-z0-9_\-])",
+            0,
+        ),
         ("url-credentials", r"://[^/\s:@]{1,64}:[^/\s@]{3,}@", 0),
         (
             "assigned-secret",
@@ -53,11 +62,26 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
 )
 
 
+# Long inputs are scanned in overlapping windows so a hostile page cannot make the cost grow
+# faster than linearly with its size (every pattern is also bounded).
+_WINDOW = 50_000
+_OVERLAP = 8_192
+
+
+def _raw_spans(text: str) -> list[SecretMatch]:
+    spans: list[SecretMatch] = []
+    for offset in range(0, max(len(text), 1), _WINDOW):
+        chunk = text[offset : offset + _WINDOW + _OVERLAP]
+        for name, rx in _PATTERNS:
+            spans.extend(
+                SecretMatch(name, offset + m.start(), offset + m.end()) for m in rx.finditer(chunk)
+            )
+    return spans
+
+
 def find_secrets(text: str) -> list[SecretMatch]:
     """Every secret-shaped span in the text (overlapping spans are merged)."""
-    spans: list[SecretMatch] = []
-    for name, rx in _PATTERNS:
-        spans.extend(SecretMatch(name, m.start(), m.end()) for m in rx.finditer(text))
+    spans = _raw_spans(text)
     spans.sort(key=lambda s: (s.start, -s.end))
     merged: list[SecretMatch] = []
     for span in spans:
@@ -68,7 +92,7 @@ def find_secrets(text: str) -> list[SecretMatch]:
 
 
 def contains_secret(text: str) -> bool:
-    return any(rx.search(text) for _, rx in _PATTERNS)
+    return bool(find_secrets(text))
 
 
 def scrub(text: str) -> str:

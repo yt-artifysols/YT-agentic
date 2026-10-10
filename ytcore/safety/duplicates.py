@@ -319,8 +319,15 @@ class PostgresFingerprintIndex:
             rows = conn.execute(
                 "SELECT job_id::text, channel_id, minhash, 1 - (embedding <=> %s::vector) "
                 "FROM content_fingerprints WHERE kind = 'script' AND channel_id <> %s "
-                "AND embedding_model = %s ORDER BY embedding <=> %s::vector LIMIT 25",
-                (_vec(fp.embedding), channel_id, fp.embedding_model, _vec(fp.embedding)),
+                "AND embedding_model = %s AND vector_dims(embedding) = %s "
+                "ORDER BY embedding <=> %s::vector LIMIT 25",
+                (
+                    _vec(fp.embedding),
+                    channel_id,
+                    fp.embedding_model,
+                    len(fp.embedding),
+                    _vec(fp.embedding),
+                ),
             ).fetchall()
             best: DuplicateMatch | None = None
             for other_job, other_channel, sig, emb in rows:

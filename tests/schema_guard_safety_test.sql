@@ -155,6 +155,18 @@ SELECT pg_temp.expect_error(
     $$INSERT INTO content_fingerprints (job_id, channel_id, kind, key)
       VALUES ('00000000-0000-0000-0000-0000000000f2', 'sf-b', 'media', 'other')$$,
     '23503', 'a fingerprint cannot be attributed to another channel''s job');
+SELECT pg_temp.expect_error(
+    $$INSERT INTO content_fingerprints (job_id, channel_id, kind, key, minhash, embedding,
+                                        embedding_model)
+      VALUES ('00000000-0000-0000-0000-0000000000f2', 'sf-a', 'script', 'dims', ARRAY[1],
+              '[1,0,0,0]', 'fake')$$,
+    '23514', 'one embedding model cannot mix vector dimensions');
+SELECT pg_temp.expect_error(
+    $$INSERT INTO content_fingerprints (job_id, channel_id, kind, key, minhash, embedding,
+                                        embedding_model)
+      VALUES ('00000000-0000-0000-0000-0000000000f2', 'sf-a', 'script', 'zero', ARRAY[1],
+              '[0,0,0]', 'other-model')$$,
+    '23514', 'a zero embedding is refused');
 SELECT pg_temp.expect_error($$UPDATE content_fingerprints SET key = 'x'$$, '42501',
                             'fingerprints are append-only');
 SELECT pg_temp.expect_error($$DELETE FROM content_fingerprints$$, '42501',
@@ -199,6 +211,18 @@ SELECT pg_temp.check(
     EXISTS (SELECT 1 FROM audit_events WHERE action = 'alert.breaker.tripped'
             AND subject = 'cluster:sf-clu'),
     'cluster alerts are audited against the cluster');
+
+-- ---------------------------------------------------------------- fail closed
+
+SELECT pg_temp.expect_error($$TRUNCATE global_controls$$, '42501',
+                            'the global kill switch row cannot be truncated away');
+CREATE TEMP TABLE saved_controls AS SELECT * FROM global_controls;
+SET LOCAL session_replication_role = replica;  -- simulate tampering that bypasses triggers
+DELETE FROM global_controls;
+SET LOCAL session_replication_role = origin;
+SELECT pg_temp.check(channel_not_paused('sf-free') IS NOT TRUE,
+                     'a missing global_controls row counts as paused');
+INSERT INTO global_controls SELECT * FROM saved_controls;
 
 SELECT pg_temp.check(audit_chain_first_break() IS NULL, 'audit chain still verifies');
 

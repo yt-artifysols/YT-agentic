@@ -239,3 +239,25 @@ def test_breaker_can_be_disabled_per_cluster(
     repo = BreakerRepository(lambda: psycopg.connect(database, autocommit=True))
     assert [t for t in run_once(repo) if t.cluster_id == cluster] == []
     assert sql("SELECT status FROM clusters WHERE id = %s", cluster) == [("active",)]
+
+
+def test_a_wrong_dimension_embedding_cannot_poison_the_index(
+    store: PostgresStore, database: str, channel: Callable[..., str], sql: SQL
+) -> None:
+    import psycopg
+
+    a, b = channel(), channel()
+    index = PostgresFingerprintIndex(lambda: psycopg.connect(database, autocommit=True))
+    index.record(job_id=_job(store, a), channel_id=a, fp=_fp())
+    bad = _job(store, a)
+    with pytest.raises(psycopg.Error):
+        sql(
+            "INSERT INTO content_fingerprints (job_id, channel_id, kind, key, minhash, "
+            "embedding, embedding_model) VALUES (%s, %s, 'script', 'x', ARRAY[1], "
+            "'[1,0,0]', %s)",
+            bad, a, HashEmbedder().model,
+        )  # fmt: skip
+    found = index.find(
+        job_id=_job(store, b), channel_id=b, fp=_fp(), thresholds=DuplicateThresholds()
+    )
+    assert {m.kind for m in found.matches} >= {"script"}
