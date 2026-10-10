@@ -80,6 +80,7 @@ def test_private_key_never_reaches_gateway_store_workflow_or_agents() -> None:
         ("key_backend", "local_file"),
         ("signaler_backend", "fake"),
         ("notifier_backend", "fake"),
+        ("rp_id", "evil.example"),
     ],
 )
 def test_production_hub_settings_refuse_dev_shortcuts(field: str, value: object) -> None:

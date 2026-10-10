@@ -220,8 +220,11 @@ class HubRepository:
         return None if r is None else dict(r[0])
 
     def is_fast_lane(self, job_id: str) -> bool:
-        info = self.qa(job_id)
-        if info is None:
+        """Fast lane needs a passing, low-risk, unflagged QA report for the CURRENT content."""
+        info, head = self.qa(job_id), self.head(job_id)
+        if info is None or head is None:
+            return False
+        if info.content_hash not in (None, head.content_hash):
             return False
         return self._is_fast_lane(info.passed, info.risk_score, len(info.flags))
 

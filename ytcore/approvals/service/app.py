@@ -1,7 +1,6 @@
 """FastAPI app for the approval hub. All state-changing routes are POST, need a valid session,
 the right role, a CSRF token and a same-origin request, and are rate limited and audited."""
 
-
 import asyncio
 import json
 import secrets
@@ -30,7 +29,7 @@ from webauthn.helpers.structs import (
 )
 
 from ytcore.approvals.service.hub import ApprovalHub, HubError
-from ytcore.approvals.service.repo import Credential, HubRepository, User
+from ytcore.approvals.service.repo import Credential, HubRepository, User, sha256
 from ytcore.approvals.service.security import (
     CEREMONY_COOKIE,
     AuthContext,
@@ -233,7 +232,15 @@ def create_app(deps: HubDeps) -> FastAPI:
         return JSONResponse({"detail": str(exc)}, status_code=exc.status)
 
     def client_key(request: Request) -> str:
-        return request.client.host if request.client else "unknown"
+        # Signed-in users are limited per session; anonymous callers per client address.
+        session = request.cookies.get("hub_session")
+        if session:
+            return "s:" + sha256(session).hex()[:32]
+        if s.trust_forwarded_for:
+            forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+            if forwarded:
+                return "f:" + forwarded
+        return "a:" + (request.client.host if request.client else "unknown")
 
     def limit(bucket: str, per_minute: int) -> Any:
         def dep(request: Request) -> None:
@@ -260,9 +267,9 @@ def create_app(deps: HubDeps) -> FastAPI:
 
     # ------------------------------------------------------------------ auth (passkeys)
 
-    auth = APIRouter(prefix="/api/auth", tags=["auth"], dependencies=[auth_limit])
+    auth = APIRouter(prefix="/api/auth", tags=["auth"])
 
-    @auth.post("/register/options")
+    @auth.post("/register/options", dependencies=[auth_limit])
     async def register_options(body: InviteOptionsIn, request: Request) -> Response:
         check_origin(request, s)
         user = await asyncio.to_thread(deps.repo.invite_user, body.invite_token)
@@ -296,7 +303,7 @@ def create_app(deps: HubDeps) -> FastAPI:
         deps.sessions.set_ceremony_cookie(response, key)
         return response
 
-    @auth.post("/register/verify", response_model=Me)
+    @auth.post("/register/verify", response_model=Me, dependencies=[auth_limit])
     async def register_verify(body: CredentialIn, request: Request, response: Response) -> Me:
         check_origin(request, s)
         ceremony = deps.ceremonies.pop(request.cookies.get(CEREMONY_COOKIE), "register")
@@ -335,7 +342,7 @@ def create_app(deps: HubDeps) -> FastAPI:
         )  # fmt: skip
         return me(user, csrf)
 
-    @auth.post("/login/options")
+    @auth.post("/login/options", dependencies=[auth_limit])
     async def login_options(body: LoginOptionsIn, request: Request) -> Response:
         check_origin(request, s)
         user = await asyncio.to_thread(deps.repo.user_by_name, body.username)
@@ -362,7 +369,7 @@ def create_app(deps: HubDeps) -> FastAPI:
         deps.sessions.set_ceremony_cookie(response, key)
         return response
 
-    @auth.post("/login/verify", response_model=Me)
+    @auth.post("/login/verify", response_model=Me, dependencies=[auth_limit])
     async def login_verify(body: CredentialIn, request: Request, response: Response) -> Me:
         check_origin(request, s)
         ceremony = deps.ceremonies.pop(request.cookies.get(CEREMONY_COOKIE), "login")
@@ -406,7 +413,7 @@ def create_app(deps: HubDeps) -> FastAPI:
         )  # fmt: skip
         return me(user, csrf)
 
-    @auth.post("/logout", response_model=Ok)
+    @auth.post("/logout", response_model=Ok, dependencies=[write_limit])
     async def logout(ctx: Session, request: Request, response: Response) -> Ok:
         await deps.sessions.end(request, response)
         await asyncio.to_thread(
@@ -415,11 +422,11 @@ def create_app(deps: HubDeps) -> FastAPI:
         )  # fmt: skip
         return Ok()
 
-    @auth.get("/me", response_model=Me)
+    @auth.get("/me", response_model=Me, dependencies=[read_limit])
     async def whoami(ctx: Session) -> Me:
         return me(ctx.user)
 
-    @auth.post("/csrf", response_model=Me)
+    @auth.post("/csrf", response_model=Me, dependencies=[write_limit])
     async def rotate_csrf(request: Request) -> Me:
         """Issue a fresh CSRF token for the current session (e.g. after a page reload).
 

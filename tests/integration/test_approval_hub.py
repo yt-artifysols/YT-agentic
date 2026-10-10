@@ -114,6 +114,13 @@ async def test_auth_rate_limit(hub: Hub) -> None:
     assert codes[0] == 200 and codes[-1] == 429
 
 
+async def test_strict_auth_limit_does_not_lock_out_signed_in_pages(hub: Hub) -> None:
+    async with hub.client() as c:
+        await hub.register(c, "nina", "approver")
+        statuses = {(await c.get("/api/auth/me")).status_code for _ in range(30)}
+    assert statuses == {200}
+
+
 # --------------------------------------------------------------------------- approval actions
 
 
@@ -249,6 +256,22 @@ async def test_batch_approve_fast_lane_only_with_per_video_hash_check(
     assert hub.store.get_state(risky) == JobState.AWAITING_APPROVAL
     assert hub.store.get_state(stale) == JobState.AWAITING_APPROVAL
     assert sql("SELECT count(*) FROM approvals WHERE job_id IN (%s, %s)", a, b)[0][0] == 2
+
+
+async def test_fast_lane_needs_qa_for_the_current_content(
+    hub: Hub, channel: Callable[..., str], sql: SQL
+) -> None:
+    job, h = hub.awaiting_job(channel(), risk=5)
+    assert hub.repo.is_fast_lane(job)
+    sql("INSERT INTO qa_reports (job_id, content_hash, passed, risk_score) "
+        "VALUES (%s, %s, true, 1)", job, "sha256:" + "e" * 64)  # fmt: skip
+    assert not hub.repo.is_fast_lane(job)  # latest QA was for other content
+    async with hub.client() as c:
+        csrf = await hub.register(c, "oscar", "approver")
+        res = await c.post("/api/jobs/batch-approve",
+                           json={"items": [{"job_id": job, "content_hash": h}]},
+                           headers={"x-csrf-token": csrf})  # fmt: skip
+    assert res.json()["results"][0]["ok"] is False
 
 
 # --------------------------------------------------------------------------- security checks

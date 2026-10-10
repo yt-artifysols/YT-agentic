@@ -24,6 +24,9 @@ class HubSettings(BaseSettings):
     session_idle_minutes: int = Field(default=15, ge=1, le=120)
     session_absolute_hours: int = Field(default=8, ge=1, le=24)
     cookie_secure: bool = False
+    # Behind the UI's reverse proxy every request comes from the proxy; trust its
+    # X-Forwarded-For for anonymous rate limiting only when the API is not exposed directly.
+    trust_forwarded_for: bool = False
     invite_ttl_hours: int = Field(default=24, ge=1, le=168)
 
     # Approval policy.
@@ -59,6 +62,9 @@ class HubSettings(BaseSettings):
             problems = []
             if not self.origin.startswith("https://"):
                 problems.append("origin must be https")
+            host = self.origin.split("://", 1)[-1].split("/", 1)[0].split(":", 1)[0]
+            if host != self.rp_id and not host.endswith("." + self.rp_id):
+                problems.append("rp_id must be the origin host or a parent domain of it")
             if not self.cookie_secure:
                 problems.append("cookie_secure must be true")
             if self.key_backend != "kms":
