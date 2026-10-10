@@ -36,6 +36,7 @@ htmlcov/
 
 # Local data
 data/
+!ytcore/evals/data/
 .local/
 *.sqlite
 *.db

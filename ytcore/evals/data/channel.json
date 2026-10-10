@@ -1,0 +1,15 @@
+{
+  "brand_voice": "Calm, precise and friendly. Plain words, no hype. Explain the evidence.",
+  "hook_library": "Most people get {topic} wrong.\nHere is what the evidence says about {topic}.",
+  "banned_claims": "guaranteed returns\ncures any disease\nrisk-free profit",
+  "style_guide": "Short sentences. Cite the evidence. No exclamation marks.",
+  "policy": {
+    "min_sources": 1,
+    "tone_words": [
+      "evidence"
+    ],
+    "forbidden_words": [
+      "hype"
+    ]
+  }
+}
