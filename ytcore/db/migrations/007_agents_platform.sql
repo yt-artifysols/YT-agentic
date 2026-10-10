@@ -28,6 +28,21 @@ CREATE TABLE channel_memory (
 );
 CREATE INDEX channel_memory_ns_idx ON channel_memory (channel_id, namespace, embedding_model);
 
+-- Memory rows never move between channels or change; deletion (retention) is audited.
+CREATE FUNCTION channel_memory_deleted() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    PERFORM audit('memory.deleted', 'channel:' || OLD.channel_id,
+                  jsonb_build_object('id', OLD.id, 'kind', OLD.kind));
+    RETURN NULL;
+END;
+$$;
+CREATE TRIGGER channel_memory_immutable BEFORE UPDATE ON channel_memory
+    FOR EACH ROW EXECUTE FUNCTION forbid_mutation();
+CREATE TRIGGER channel_memory_no_truncate BEFORE TRUNCATE ON channel_memory
+    FOR EACH STATEMENT EXECUTE FUNCTION forbid_mutation();
+CREATE TRIGGER channel_memory_deleted AFTER DELETE ON channel_memory
+    FOR EACH ROW EXECUTE FUNCTION channel_memory_deleted();
+
 -- ---------------------------------------------------------------- rights and licenses
 
 CREATE TABLE rights_register (
@@ -65,17 +80,22 @@ $$;
 
 CREATE TRIGGER rights_register_guard BEFORE UPDATE ON rights_register
     FOR EACH ROW EXECUTE FUNCTION rights_register_guard();
-CREATE TRIGGER rights_register_audit AFTER INSERT OR UPDATE ON rights_register
+CREATE TRIGGER rights_register_audit AFTER INSERT ON rights_register
     FOR EACH ROW EXECUTE FUNCTION rights_register_audit();
+CREATE TRIGGER rights_register_revoked_audit AFTER UPDATE ON rights_register
+    FOR EACH ROW WHEN (OLD.revoked_at IS NULL AND NEW.revoked_at IS NOT NULL)
+    EXECUTE FUNCTION rights_register_audit();
 CREATE TRIGGER rights_register_no_delete BEFORE DELETE ON rights_register
     FOR EACH ROW EXECUTE FUNCTION forbid_mutation();
 CREATE TRIGGER rights_register_no_truncate BEFORE TRUNCATE ON rights_register
     FOR EACH STATEMENT EXECUTE FUNCTION forbid_mutation();
 
-CREATE FUNCTION license_valid(p_ref text, p_channel text) RETURNS boolean
-LANGUAGE sql STABLE AS $$
+-- p_kind (music | stock | font | voice) must match the license when given.
+CREATE FUNCTION license_valid(p_ref text, p_channel text, p_kind text DEFAULT NULL)
+RETURNS boolean LANGUAGE sql STABLE AS $$
     SELECT EXISTS (SELECT 1 FROM rights_register
                    WHERE license_ref = p_ref
+                     AND (p_kind IS NULL OR asset_kind = p_kind)
                      AND (channel_id IS NULL OR channel_id = p_channel)
                      AND revoked_at IS NULL
                      AND (expires_at IS NULL OR expires_at > now()));
@@ -105,7 +125,9 @@ BEGIN
     IF NEW.kind IN ('music', 'stock') AND NEW.license_ref IS NULL THEN
         RAISE EXCEPTION '% assets need a license_ref', NEW.kind USING ERRCODE = 'YTL01';
     END IF;
-    IF NEW.license_ref IS NOT NULL AND NOT license_valid(NEW.license_ref, NEW.channel_id) THEN
+    IF NEW.license_ref IS NOT NULL AND NOT license_valid(
+           NEW.license_ref, NEW.channel_id,
+           CASE WHEN NEW.kind IN ('music', 'stock') THEN NEW.kind END) THEN
         RAISE EXCEPTION 'license % is not valid for channel %', NEW.license_ref, NEW.channel_id
             USING ERRCODE = 'YTL01';
     END IF;
@@ -130,7 +152,31 @@ ALTER TABLE channels
     ADD COLUMN job_budget_cents integer NOT NULL DEFAULT 1000 CHECK (job_budget_cents >= 0);
 ALTER TABLE job_costs
     ADD COLUMN provider text,
-    ADD COLUMN detail   jsonb NOT NULL DEFAULT '{}'::jsonb;
+    ADD COLUMN detail   jsonb NOT NULL DEFAULT '{}'::jsonb,
+    -- A cost already incurred that crossed a cap is still recorded (and audited) so the books
+    -- stay true; the caps then refuse every further call (costs.CostMeter.authorize).
+    ADD COLUMN over_cap boolean NOT NULL DEFAULT false;
+
+-- Replaces 003's channel/day check: same rule, but recorded overruns are let through.
+CREATE OR REPLACE FUNCTION job_costs_budget() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+    budget integer;
+    spent  bigint;
+BEGIN
+    -- Lock the channel row so concurrent cost inserts for one channel serialize.
+    SELECT daily_budget_cents INTO budget FROM channels WHERE id = NEW.channel_id FOR UPDATE;
+    IF NEW.over_cap THEN
+        RETURN NEW;
+    END IF;
+    SELECT coalesce(sum(cost_cents), 0) INTO spent FROM job_costs
+        WHERE channel_id = NEW.channel_id AND cost_date = NEW.cost_date;
+    IF spent + NEW.cost_cents > budget THEN
+        RAISE EXCEPTION 'daily budget exceeded for channel % (% + % > % cents)',
+            NEW.channel_id, spent, NEW.cost_cents, budget USING ERRCODE = 'YTB01';
+    END IF;
+    RETURN NEW;
+END;
+$$;
 
 CREATE FUNCTION job_costs_job_budget() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
@@ -138,6 +184,9 @@ DECLARE
     spent  bigint;
 BEGIN
     -- job_costs_budget (fires first, by name) already holds the channel row lock.
+    IF NEW.over_cap THEN
+        RETURN NEW;
+    END IF;
     SELECT job_budget_cents INTO budget FROM channels WHERE id = NEW.channel_id;
     SELECT coalesce(sum(cost_cents), 0) INTO spent FROM job_costs WHERE job_id = NEW.job_id;
     IF spent + NEW.cost_cents > budget THEN
@@ -151,6 +200,16 @@ $$;
 CREATE TRIGGER job_costs_job_budget BEFORE INSERT ON job_costs
     FOR EACH ROW EXECUTE FUNCTION job_costs_job_budget();
 
+CREATE FUNCTION job_costs_overrun_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    PERFORM audit('cost.over_cap', 'job:' || NEW.job_id,
+                  jsonb_build_object('cents', NEW.cost_cents, 'provider', NEW.provider));
+    RETURN NULL;
+END;
+$$;
+CREATE TRIGGER job_costs_overrun_audit AFTER INSERT ON job_costs
+    FOR EACH ROW WHEN (NEW.over_cap) EXECUTE FUNCTION job_costs_overrun_audit();
+
 -- ---------------------------------------------------------------- alerts
 
 CREATE TABLE alerts (
@@ -159,7 +218,9 @@ CREATE TABLE alerts (
     job_id     uuid REFERENCES video_jobs (id),
     kind       text NOT NULL CHECK (kind ~ '^[a-z][a-z0-9_.]{1,62}$'),
     message    text NOT NULL CHECK (length(message) BETWEEN 1 AND 2000),
-    created_at timestamptz NOT NULL DEFAULT now()
+    created_at timestamptz NOT NULL DEFAULT now(),
+    -- An alert about a job belongs to that job's channel.
+    FOREIGN KEY (job_id, channel_id) REFERENCES video_jobs (id, channel_id)
 );
 CREATE INDEX alerts_created_idx ON alerts (created_at);
 

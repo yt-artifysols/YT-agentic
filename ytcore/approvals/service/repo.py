@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -19,6 +20,14 @@ from ytcore.store.errors import StoreError
 from ytcore.store.postgres import Connect, map_db_error
 
 Role = Literal["approver", "operator", "admin"]
+
+
+def _is_uuid(value: str) -> bool:
+    try:
+        uuid.UUID(value)
+    except ValueError:
+        return False
+    return True
 
 
 def sha256(value: str) -> bytes:
@@ -301,10 +310,12 @@ class HubRepository:
         return [doc_from_row(r) for r in rows]
 
     def knowledge_doc(self, doc_id: str) -> KnowledgeDoc | None:
+        if not _is_uuid(doc_id):
+            return None
         with self._tx("hub:reader") as conn:
             row = self._one(
                 conn,
-                f"SELECT {self._KB_COLS} FROM knowledge_docs WHERE id::text = %s",  # noqa: S608
+                f"SELECT {self._KB_COLS} FROM knowledge_docs WHERE id = %s::uuid",  # noqa: S608
                 (doc_id,),
             )
         return doc_from_row(row) if row else None
@@ -334,10 +345,12 @@ class HubRepository:
     ) -> KnowledgeDoc:
         """Approve or reject a draft as a human approver. The DB re-checks the approver's role,
         that the draft is still a draft and that it is based on the current approved version."""
+        if not _is_uuid(doc_id):
+            raise HubConflict("knowledge draft not found")
         with self._tx(f"hub:{username}") as conn:
             row = self._one(
                 conn,
-                "SELECT status, content_sha256 FROM knowledge_docs WHERE id::text = %s FOR UPDATE",
+                "SELECT status, content_sha256 FROM knowledge_docs WHERE id = %s::uuid FOR UPDATE",
                 (doc_id,),
             )
             if row is None:
@@ -347,13 +360,13 @@ class HubRepository:
             if approve:
                 sql = (
                     "UPDATE knowledge_docs SET status = 'approved', approved_by = %s, "  # noqa: S608
-                    f"approved_at = now() WHERE id::text = %s RETURNING {self._KB_COLS}"
+                    f"approved_at = now() WHERE id = %s::uuid RETURNING {self._KB_COLS}"
                 )
                 params: tuple[Any, ...] = (username, doc_id)
             else:
                 sql = (
                     "UPDATE knowledge_docs SET status = 'rejected', rejected_by = %s, "  # noqa: S608
-                    "rejected_at = now(), reject_reason = %s WHERE id::text = %s "
+                    "rejected_at = now(), reject_reason = %s WHERE id = %s::uuid "
                     f"RETURNING {self._KB_COLS}"
                 )
                 params = (username, reason, doc_id)

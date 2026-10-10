@@ -32,8 +32,9 @@ async def test_agent_draft_needs_a_human_approver(
 ) -> None:
     chan = channel()
     kb = PostgresKnowledge.from_conninfo(database).channel(chan)
-    v1 = kb.propose(KnowledgeKind.BANNED_CLAIMS, "guaranteed income", proposed_by="owner",
-                    base_version=None)  # fmt: skip
+    v1 = kb.propose(
+        KnowledgeKind.BANNED_CLAIMS, "guaranteed income", proposed_by="owner", base_version=None
+    )
     draft = kb.propose(
         KnowledgeKind.BANNED_CLAIMS,
         "guaranteed income\ncures any disease",
@@ -45,16 +46,20 @@ async def test_agent_draft_needs_a_human_approver(
         ap_csrf = await hub.register(ap, "kb-ap", "approver")
 
         # The first version needs approval too; approve it so the agent draft can build on it.
-        r = await ap.post(f"/api/knowledge/drafts/{v1.id}/approve",
-                          json={"content_sha256": v1.content_sha256},
-                          headers={"x-csrf-token": ap_csrf})  # fmt: skip
+        r = await ap.post(
+            f"/api/knowledge/drafts/{v1.id}/approve",
+            json={"content_sha256": v1.content_sha256},
+            headers={"x-csrf-token": ap_csrf},
+        )
         assert r.status_code == 200, r.text
         # The agent's draft was written without a base version: it is stale now.
         stale = await ap.get(f"/api/knowledge/drafts/{draft.id}")
         assert stale.json()["stale"] is True
-        r = await ap.post(f"/api/knowledge/drafts/{draft.id}/approve",
-                          json={"content_sha256": draft.content_sha256},
-                          headers={"x-csrf-token": ap_csrf})  # fmt: skip
+        r = await ap.post(
+            f"/api/knowledge/drafts/{draft.id}/approve",
+            json={"content_sha256": draft.content_sha256},
+            headers={"x-csrf-token": ap_csrf},
+        )
         assert r.status_code == 409
 
         fresh = kb.propose(
@@ -74,23 +79,31 @@ async def test_agent_draft_needs_a_human_approver(
         assert body["base_content"] == "guaranteed income"
 
         # Operators cannot approve; a wrong hash is refused; the approver approves.
-        r = await op.post(f"/api/knowledge/drafts/{fresh.id}/approve",
-                          json={"content_sha256": fresh.content_sha256},
-                          headers={"x-csrf-token": op_csrf})  # fmt: skip
+        r = await op.post(
+            f"/api/knowledge/drafts/{fresh.id}/approve",
+            json={"content_sha256": fresh.content_sha256},
+            headers={"x-csrf-token": op_csrf},
+        )
         assert r.status_code == 403
-        r = await ap.post(f"/api/knowledge/drafts/{fresh.id}/approve",
-                          json={"content_sha256": "sha256:" + "0" * 64},
-                          headers={"x-csrf-token": ap_csrf})  # fmt: skip
+        r = await ap.post(
+            f"/api/knowledge/drafts/{fresh.id}/approve",
+            json={"content_sha256": "sha256:" + "0" * 64},
+            headers={"x-csrf-token": ap_csrf},
+        )
         assert r.status_code == 409
-        r = await ap.post(f"/api/knowledge/drafts/{fresh.id}/approve",
-                          json={"content_sha256": fresh.content_sha256},
-                          headers={"x-csrf-token": ap_csrf})  # fmt: skip
+        r = await ap.post(
+            f"/api/knowledge/drafts/{fresh.id}/approve",
+            json={"content_sha256": fresh.content_sha256},
+            headers={"x-csrf-token": ap_csrf},
+        )
         assert r.status_code == 200, r.text
         validate("/api/knowledge/drafts/{doc_id}/approve", "post", r.json())
         assert r.json()["approved_by"] == "kb-ap"
-        r = await ap.post(f"/api/knowledge/drafts/{draft.id}/reject",
-                          json={"content_sha256": draft.content_sha256, "reason": "stale"},
-                          headers={"x-csrf-token": ap_csrf})  # fmt: skip
+        r = await ap.post(
+            f"/api/knowledge/drafts/{draft.id}/reject",
+            json={"content_sha256": draft.content_sha256, "reason": "stale"},
+            headers={"x-csrf-token": ap_csrf},
+        )
         assert r.status_code == 200 and r.json()["status"] == "rejected"
 
         current = await op.get(f"/api/channels/{chan}/knowledge")
@@ -99,8 +112,11 @@ async def test_agent_draft_needs_a_human_approver(
     snap = kb.latest_approved()
     assert snap.versions() == {"banned_claims": 3}
     assert snap.banned_claims == ["guaranteed income", "cures any disease"]
-    audit = sql("SELECT payload->>'by' FROM audit_events WHERE action = 'knowledge.approved' "
-                "AND subject = %s ORDER BY id", f"channel:{chan}")  # fmt: skip
+    audit = sql(
+        "SELECT payload->>'by' FROM audit_events WHERE action = 'knowledge.approved' "
+        "AND subject = %s ORDER BY id",
+        f"channel:{chan}",
+    )
     assert audit == [("kb-ap",), ("kb-ap",)]
 
 
@@ -109,8 +125,9 @@ def test_agents_cannot_approve_even_through_the_hub_repository(
 ) -> None:
     chan = channel()
     kb = PostgresKnowledge.from_conninfo(database).channel(chan)
-    draft = kb.propose(KnowledgeKind.HOOK_LIBRARY, "Stop scrolling", proposed_by="agent:script",
-                       base_version=None)  # fmt: skip
+    draft = kb.propose(
+        KnowledgeKind.HOOK_LIBRARY, "Stop scrolling", proposed_by="agent:script", base_version=None
+    )
     for who in ("agent:script", "nobody"):
         with pytest.raises(KnowledgeForbidden):
             hub.repo.decide_knowledge(draft.id, draft.content_sha256, username=who, approve=True)
@@ -123,22 +140,33 @@ async def test_owner_inputs_through_the_hub(hub: Hub, channel: Callable[..., str
         op_csrf = await hub.register(op, "in-op", "operator")
         ap_csrf = await hub.register(ap, "in-ap", "approver")
         idea = {"kind": "idea", "body": "Why compound interest beats timing the market"}
-        r = await op.post(f"/api/channels/{chan}/inputs", json=idea,
-                          headers={"x-csrf-token": op_csrf})  # fmt: skip
+        r = await op.post(
+            f"/api/channels/{chan}/inputs", json=idea, headers={"x-csrf-token": op_csrf}
+        )
         assert r.status_code == 200, r.text
         validate("/api/channels/{channel_id}/inputs", "post", r.json())
         assert r.json()["status"] == "new" and r.json()["submitted_by"] == "in-op"
-        dup = await op.post(f"/api/channels/{chan}/inputs", json=idea,
-                            headers={"x-csrf-token": op_csrf})  # fmt: skip
+        dup = await op.post(
+            f"/api/channels/{chan}/inputs", json=idea, headers={"x-csrf-token": op_csrf}
+        )
         assert dup.status_code == 400
-        bad = await op.post(f"/api/channels/{chan}/inputs", json={"kind": "footage", "body": "x"},
-                            headers={"x-csrf-token": op_csrf})  # fmt: skip
+        bad = await op.post(
+            f"/api/channels/{chan}/inputs",
+            json={"kind": "footage", "body": "x"},
+            headers={"x-csrf-token": op_csrf},
+        )
         assert bad.status_code == 400
         goal = {"kind": "goal", "body": "audience: new investors; cadence: 3/week"}
-        assert (await op.post(f"/api/channels/{chan}/inputs", json=goal,
-                              headers={"x-csrf-token": op_csrf})).status_code == 200  # fmt: skip
-        r = await ap.post(f"/api/channels/{chan}/inputs", json={"kind": "note", "body": "n"},
-                          headers={"x-csrf-token": ap_csrf})  # fmt: skip
+        assert (
+            await op.post(
+                f"/api/channels/{chan}/inputs", json=goal, headers={"x-csrf-token": op_csrf}
+            )
+        ).status_code == 200
+        r = await ap.post(
+            f"/api/channels/{chan}/inputs",
+            json={"kind": "note", "body": "n"},
+            headers={"x-csrf-token": ap_csrf},
+        )
         assert r.status_code == 403
         listed = await ap.get(f"/api/channels/{chan}/inputs", params={"status": "new"})
         assert sorted(i["kind"] for i in listed.json()) == ["goal", "idea"]
@@ -152,21 +180,100 @@ def test_ytctl_input_and_knowledge(
     kb = PostgresKnowledge.from_conninfo(database)
     clip = tmp_path / "clip.mp4"
     clip.write_bytes(b"\x00\x01fake-footage")
-    assert cli.main(["input", "add", "--channel", chan, "--kind", "idea", "--text", "Idea A"],
-                    inputs=inputs, actor="cli:owner") == 0  # fmt: skip
+    assert (
+        cli.main(
+            ["input", "add", "--channel", chan, "--kind", "idea", "--text", "Idea A"],
+            inputs=inputs,
+            actor="cli:owner",
+        )
+        == 0
+    )
     footage_args = ["--kind", "footage", "--file", str(clip), "--note", "B-roll of the office"]
-    assert cli.main(["input", "add", "--channel", chan, *footage_args],
-                    inputs=inputs, actor="cli:owner") == 0  # fmt: skip
-    assert cli.main(["input", "add", "--channel", chan, "--kind", "idea", "--text", "Idea A"],
-                    inputs=inputs, actor="cli:owner") == 1  # fmt: skip
+    assert (
+        cli.main(
+            ["input", "add", "--channel", chan, *footage_args], inputs=inputs, actor="cli:owner"
+        )
+        == 0
+    )
+    assert (
+        cli.main(
+            ["input", "add", "--channel", chan, "--kind", "idea", "--text", "Idea A"],
+            inputs=inputs,
+            actor="cli:owner",
+        )
+        == 1
+    )
     items = inputs.list_for(chan)
     footage = next(i for i in items if i.kind == "footage")
     assert footage.uri == clip.resolve().as_uri() and footage.body == "B-roll of the office"
     assert footage.sha256.startswith("sha256:")
     claims = tmp_path / "claims.md"
     claims.write_text("# banned\n- doubles your money\n")
-    assert cli.main(["knowledge", "propose", "--channel", chan, "--kind", "banned_claims",
-                     "--file", str(claims)], knowledge=kb, actor="cli:owner") == 0  # fmt: skip
+    assert (
+        cli.main(
+            [
+                "knowledge",
+                "propose",
+                "--channel",
+                chan,
+                "--kind",
+                "banned_claims",
+                "--file",
+                str(claims),
+            ],
+            knowledge=kb,
+            actor="cli:owner",
+        )
+        == 0
+    )
     assert "a human approver must approve it" in capsys.readouterr().out
     assert kb.channel(chan).latest_approved().versions() == {}
     assert [d.kind for d in kb.channel(chan).drafts()] == ["banned_claims"]
+
+
+def test_two_drafts_on_the_same_base_cannot_both_be_approved(
+    hub: Hub, database: str, channel: Callable[..., str]
+) -> None:
+    """Concurrent approvals serialize on the channel/kind lock; the second one is stale."""
+    import threading
+
+    import psycopg
+
+    chan = channel()
+    hub.repo.create_user("race-ap", "Racer", "approver", actor="hub:test")
+    kb = PostgresKnowledge.from_conninfo(database).channel(chan)
+    v1 = kb.propose(KnowledgeKind.STYLE_GUIDE, "v1", proposed_by="owner", base_version=None)
+    hub.repo.decide_knowledge(v1.id, v1.content_sha256, username="race-ap", approve=True)
+    a = kb.propose(KnowledgeKind.STYLE_GUIDE, "A", proposed_by="agent:qa", base_version=1)
+    b = kb.propose(KnowledgeKind.STYLE_GUIDE, "B", proposed_by="agent:qa", base_version=1)
+    approve = (
+        "UPDATE knowledge_docs SET status = 'approved', approved_by = 'race-ap', "
+        "approved_at = now() WHERE id = %s"
+    )
+    first = psycopg.connect(database)
+    second = psycopg.connect(database)
+    errors: list[str] = []
+    try:
+        for conn in (first, second):
+            conn.execute("SELECT set_config('app.actor', 'hub:race-ap', true)")
+        first.execute(approve, (a.id,))  # holds the lock, not committed yet
+
+        def run() -> None:
+            try:
+                second.execute(approve, (b.id,))
+                second.commit()
+            except psycopg.Error as exc:
+                errors.append(exc.sqlstate or "")
+                second.rollback()
+
+        thread = threading.Thread(target=run)
+        thread.start()
+        thread.join(timeout=0.5)
+        assert thread.is_alive()  # blocked on the lock
+        first.commit()
+        thread.join(timeout=10)
+    finally:
+        first.close()
+        second.close()
+    assert errors == ["YTK01"]
+    assert kb.latest_approved().text(KnowledgeKind.STYLE_GUIDE) == "A"

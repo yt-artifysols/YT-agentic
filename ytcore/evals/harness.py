@@ -79,16 +79,19 @@ def _run(sample: Sample, llm: LLMProvider, until: str) -> Run:
             knowledge.seed_approved(CHANNEL, kind, text, approver="eval-owner")
     inputs = InMemoryInputs()
     urls = "\n".join(s["url"] for s in sample.sources)
-    inputs.add(CHANNEL, InputKind.IDEA, body=f"{sample.topic}\n{urls}".strip(),
-               submitted_by="eval")  # fmt: skip
-    web = FakeWebFetcher({s["url"]: (s["title"], s["text"]) for s in sample.sources},
-                         fallback=False)  # fmt: skip
+    inputs.add(CHANNEL, InputKind.IDEA, body=f"{sample.topic}\n{urls}".strip(), submitted_by="eval")
+    web = FakeWebFetcher(
+        {s["url"]: (s["title"], s["text"]) for s in sample.sources}, fallback=False
+    )
     assets = InMemoryAssetSource()
     pipeline = AgentPipeline(
-        store=_TaggingStore(store), knowledge=knowledge, inputs=inputs,
-        memory=InMemoryMemory(), assets=assets,
+        store=_TaggingStore(store),
+        knowledge=knowledge,
+        inputs=inputs,
+        memory=InMemoryMemory(),
+        assets=assets,
         providers=Providers(llm, FakeTTS(), FakeImage(), FakeVideo(), FakeStockLibrary(), web),
-    )  # fmt: skip
+    )
     run = Run(sample, pipeline, store, assets)
     store.add_job(run.job_id, CHANNEL)
     for stage in ("research", "script", "render"):
@@ -107,11 +110,21 @@ class _TaggingStore:
     def __getattr__(self, name: str) -> Any:
         return getattr(self._inner, name)
 
-    def record_cost(self, job_id: str, kind: str, cost_cents: int, *, provider: str,
-                    detail: dict[str, Any], actor: str) -> None:  # fmt: skip
+    def record_cost(
+        self,
+        job_id: str,
+        kind: str,
+        cost_cents: int,
+        *,
+        provider: str,
+        detail: dict[str, Any],
+        actor: str,
+        over_cap: bool = False,
+    ) -> None:
         detail = {**detail, "agent": actor.removeprefix("agent:")}
-        self._inner.record_cost(job_id, kind, cost_cents, provider=provider, detail=detail,
-                                actor=actor)  # fmt: skip
+        self._inner.record_cost(
+            job_id, kind, cost_cents, provider=provider, detail=detail, actor=actor
+        )
 
 
 # ----------------------------------------------------------------------------- rubrics

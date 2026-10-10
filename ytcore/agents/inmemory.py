@@ -91,9 +91,15 @@ class InMemoryProductionStore:
         provider: str,
         detail: dict[str, Any],
         actor: str,
+        over_cap: bool = False,
     ) -> None:
         channel_id = self.job_channel[job_id]
         s = self.spend(job_id, channel_id)
+        if over_cap:
+            self.costs.append(
+                (job_id, channel_id, kind, cost_cents, provider, {**detail, "over_cap": True})
+            )
+            return
         if s.channel_today_cents + cost_cents > s.channel_budget_cents:
             raise BudgetExceeded(f"daily budget exceeded for channel {channel_id}")
         if s.job_cents + cost_cents > s.job_budget_cents:

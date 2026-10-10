@@ -86,7 +86,15 @@ BEGIN
             USING ERRCODE = 'insufficient_privilege';
     END IF;
 
+    IF NEW.status IN ('approved', 'rejected')
+       AND app_actor() IS DISTINCT FROM 'hub:' || coalesce(NEW.approved_by, NEW.rejected_by) THEN
+        RAISE EXCEPTION 'knowledge decisions are made through the approval hub by the approver'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
     IF NEW.status = 'approved' THEN
+        -- Serialize with other approvals (and new drafts) of this channel and kind, so two
+        -- drafts on the same base can never both be approved.
+        PERFORM pg_advisory_xact_lock(hashtext('knowledge:' || NEW.channel_id || ':' || NEW.kind));
         IF NOT knowledge_is_human_approver(NEW.approved_by) THEN
             RAISE EXCEPTION 'knowledge approval requires an active human approver'
                 USING ERRCODE = 'insufficient_privilege';
@@ -220,8 +228,10 @@ BEGIN
        <> (to_jsonb(OLD) - ARRAY['status', 'used_by_job', 'updated_at']) THEN
         RAISE EXCEPTION 'owner input content is immutable' USING ERRCODE = 'check_violation';
     END IF;
-    IF OLD.used_by_job IS NOT NULL AND NEW.used_by_job IS DISTINCT FROM OLD.used_by_job THEN
-        RAISE EXCEPTION 'owner input already used by job %', OLD.used_by_job
+    IF NEW.used_by_job IS DISTINCT FROM OLD.used_by_job
+       AND (OLD.used_by_job IS NOT NULL
+            OR current_setting('ytcore.input_link', true) IS DISTINCT FROM 'on') THEN
+        RAISE EXCEPTION 'owner inputs are marked used only by linking them to a job'
             USING ERRCODE = 'check_violation';
     END IF;
     IF NEW.status IS DISTINCT FROM OLD.status AND NOT (
@@ -285,8 +295,10 @@ BEGIN
                 USING ERRCODE = 'check_violation';
         END IF;
         IF i.status = 'new' THEN
+            PERFORM set_config('ytcore.input_link', 'on', true);
             UPDATE owner_inputs SET status = 'used', used_by_job = NEW.job_id
             WHERE id = NEW.input_id;
+            PERFORM set_config('ytcore.input_link', 'off', true);
         END IF;
     END IF;
     RETURN NEW;

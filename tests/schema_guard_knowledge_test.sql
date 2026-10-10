@@ -48,13 +48,18 @@ INSERT INTO channels (id, display_name, storage_prefix, memory_namespace, daily_
                       job_budget_cents)
 VALUES ('kb-a', 'A', 'channels/kb-a/', 'mem:kb-a', 1000, 100),
        ('kb-b', 'B', 'channels/kb-b/', 'mem:kb-b', 1000, 100);
-INSERT INTO hub_users (username, display_name, role)
-VALUES ('kb-approver', 'Approver', 'approver'), ('kb-operator', 'Operator', 'operator');
+INSERT INTO hub_users (username, display_name, role, disabled_at)
+VALUES ('kb-approver', 'Approver', 'approver', NULL), ('kb-operator', 'Operator', 'operator', NULL),
+       ('kb-gone', 'Former approver', 'approver', now());
 INSERT INTO video_jobs (id, channel_id, origin)
 VALUES ('00000000-0000-0000-0000-00000000aa01', 'kb-a', 'owner'),
+       ('00000000-0000-0000-0000-00000000aa02', 'kb-a', 'owner'),
        ('00000000-0000-0000-0000-00000000bb01', 'kb-b', 'owner');
 
 -- ---------------------------------------------------------------- knowledge
+
+-- Decisions are made through the hub: app.actor must be the deciding approver.
+DO $$ BEGIN PERFORM set_config('app.actor', 'hub:kb-approver', true); END $$;
 
 SELECT pg_temp.expect_error(
     $$INSERT INTO knowledge_docs (channel_id, kind, version, content, content_sha256, status,
@@ -82,6 +87,21 @@ SELECT pg_temp.expect_error(
 SELECT pg_temp.expect_error(
     $$UPDATE knowledge_docs SET content = 'edited' WHERE channel_id = 'kb-a'$$,
     '42501', 'draft content is immutable');
+SELECT pg_temp.expect_error(
+    $$UPDATE knowledge_docs SET status = 'approved', approved_by = 'kb-gone',
+             approved_at = now() WHERE channel_id = 'kb-a' AND kind = 'banned_claims'$$,
+    '42501', 'a decision must come from the approver named in it (via the hub)');
+DO $$ BEGIN PERFORM set_config('app.actor', 'hub:kb-gone', true); END $$;
+SELECT pg_temp.expect_error(
+    $$UPDATE knowledge_docs SET status = 'approved', approved_by = 'kb-gone',
+             approved_at = now() WHERE channel_id = 'kb-a' AND kind = 'banned_claims'$$,
+    '42501', 'a disabled approver cannot approve knowledge');
+DO $$ BEGIN PERFORM set_config('app.actor', 'hub:kb-operator', true); END $$;
+SELECT pg_temp.expect_error(
+    $$UPDATE knowledge_docs SET status = 'rejected', rejected_by = 'kb-operator',
+             rejected_at = now(), reject_reason = 'nope' WHERE channel_id = 'kb-a'$$,
+    '42501', 'an operator cannot reject knowledge');
+DO $$ BEGIN PERFORM set_config('app.actor', 'hub:kb-approver', true); END $$;
 SELECT pg_temp.expect_ok(
     $$UPDATE knowledge_docs SET status = 'approved', approved_by = 'kb-approver',
              approved_at = now() WHERE channel_id = 'kb-a' AND kind = 'banned_claims'$$,
@@ -143,6 +163,8 @@ SELECT pg_temp.expect_error(
       WHERE content = 'v2 a'$$,
     '23503', 'a job cannot use another channel''s knowledge');
 SELECT pg_temp.expect_error($$DELETE FROM job_knowledge$$, '42501', 'job knowledge is append-only');
+SELECT pg_temp.expect_error($$UPDATE job_knowledge SET version = 9$$, '42501',
+                            'job knowledge cannot be changed');
 
 -- ---------------------------------------------------------------- owner inputs
 
@@ -186,6 +208,29 @@ SELECT pg_temp.expect_error(
 SELECT pg_temp.expect_error(
     $$UPDATE owner_inputs SET status = 'new', used_by_job = NULL WHERE kind = 'idea'$$,
     '23514', 'a used input cannot be re-queued');
+SELECT pg_temp.expect_error(
+    $$INSERT INTO job_owner_inputs (job_id, channel_id, input_id)
+      VALUES ('00000000-0000-0000-0000-00000000aa02', 'kb-a',
+              '00000000-0000-0000-0000-0000000000a1')$$,
+    '23514', 'an idea used by one job cannot be linked to another');
+INSERT INTO owner_inputs (id, channel_id, kind, body, sha256, submitted_by)
+VALUES ('00000000-0000-0000-0000-0000000000a3', 'kb-a', 'note', 'A note',
+        'sha256:' || encode(sha256('A note'), 'hex'), 'owner');
+SELECT pg_temp.expect_error(
+    $$UPDATE owner_inputs SET status = 'used', used_by_job = '00000000-0000-0000-0000-00000000aa02'
+      WHERE kind = 'note'$$,
+    '23514', 'inputs are marked used only by linking them to a job');
+SELECT pg_temp.expect_error(
+    $$UPDATE owner_inputs SET status = 'archived',
+             used_by_job = '00000000-0000-0000-0000-00000000aa02' WHERE kind = 'note'$$,
+    '23514', 'archiving cannot attach a job');
+SELECT pg_temp.expect_error(
+    $$UPDATE owner_inputs SET status = 'used' WHERE kind = 'goal'$$,
+    '23514', 'a goal is never consumed');
+SELECT pg_temp.expect_ok($$UPDATE owner_inputs SET status = 'archived' WHERE kind = 'note'$$,
+                         'an input can be archived');
+SELECT pg_temp.expect_error($$UPDATE owner_inputs SET status = 'new' WHERE kind = 'note'$$,
+                            '23514', 'an archived input cannot be re-queued');
 SELECT pg_temp.expect_error($$DELETE FROM owner_inputs$$, '42501', 'owner inputs are never deleted');
 SELECT pg_temp.expect_error($$DELETE FROM job_owner_inputs$$, '42501',
                             'input provenance is append-only');
@@ -202,13 +247,44 @@ SELECT pg_temp.expect_error(
                                   embedding)
       VALUES ('kb-a', 'mem:kb-b', 'fact', 'Leak', 'fake', '[1,0,0]')$$,
     '23503', 'memory cannot be written into another channel''s namespace');
+SELECT pg_temp.expect_error(
+    $$UPDATE channel_memory SET channel_id = 'kb-b', namespace = 'mem:kb-b'$$,
+    '42501', 'memory rows cannot move to another channel');
+INSERT INTO channel_memory (channel_id, namespace, kind, content, embedding_model, embedding)
+VALUES ('kb-a', 'mem:kb-a', 'fact', 'Old fact', 'fake', '[0,1,0]');
+SELECT pg_temp.expect_ok($$DELETE FROM channel_memory WHERE content = 'Old fact'$$,
+                         'memory retention delete');
+SELECT pg_temp.check(EXISTS (SELECT 1 FROM audit_events WHERE action = 'memory.deleted'),
+                     'memory deletion is audited');
 
 -- ---------------------------------------------------------------- licenses and assets
 
-INSERT INTO rights_register (license_ref, channel_id, asset_kind, provider)
-VALUES ('lic_music-a', 'kb-a', 'music', 'fake-stock'),
-       ('lic_music-old', NULL, 'music', 'fake-stock');
+INSERT INTO rights_register (license_ref, channel_id, asset_kind, provider, expires_at)
+VALUES ('lic_music-a', 'kb-a', 'music', 'fake-stock', NULL),
+       ('lic_music-old', NULL, 'music', 'fake-stock', NULL),
+       ('lic_font-a', 'kb-a', 'font', 'fake-fonts', NULL),
+       ('lic_music-exp', NULL, 'music', 'fake-stock', now() - interval '1 day');
 UPDATE rights_register SET revoked_at = now() WHERE license_ref = 'lic_music-old';
+SELECT pg_temp.expect_error(
+    $$UPDATE rights_register SET revoked_at = now() + interval '1 hour'
+      WHERE license_ref = 'lic_music-old'$$,
+    '23514', 'a revocation happens once');
+UPDATE rights_register SET revoked_at = NULL WHERE license_ref = 'lic_music-a';
+SELECT pg_temp.check(
+    (SELECT count(*) FROM audit_events WHERE action = 'license.revoked') = 1,
+    'only real revocations are audited');
+SELECT pg_temp.expect_error(
+    $$INSERT INTO job_assets (job_id, channel_id, name, version, kind, sha256, media_type,
+                              license_ref, provider)
+      VALUES ('00000000-0000-0000-0000-00000000aa01', 'kb-a', 'music', 0, 'music',
+              'sha256:' || repeat('1', 64), 'audio/mpeg', 'lic_font-a', 'fake')$$,
+    'YTL01', 'a license for another asset kind is refused');
+SELECT pg_temp.expect_error(
+    $$INSERT INTO job_assets (job_id, channel_id, name, version, kind, sha256, media_type,
+                              license_ref, provider)
+      VALUES ('00000000-0000-0000-0000-00000000aa01', 'kb-a', 'music', 0, 'music',
+              'sha256:' || repeat('1', 64), 'audio/mpeg', 'lic_music-exp', 'fake')$$,
+    'YTL01', 'an expired license is refused');
 SELECT pg_temp.expect_error(
     $$UPDATE rights_register SET provider = 'other' WHERE license_ref = 'lic_music-a'$$,
     '23514', 'licenses are immutable');
@@ -255,6 +331,12 @@ SELECT pg_temp.expect_error(
       VALUES ('00000000-0000-0000-0000-00000000aa01', 'kb-a', 'llm', 20, 'fake-llm')$$,
     'YTB02', 'the per-job budget is enforced');
 SELECT pg_temp.expect_ok(
+    $$INSERT INTO job_costs (job_id, channel_id, kind, cost_cents, provider, over_cap)
+      VALUES ('00000000-0000-0000-0000-00000000aa01', 'kb-a', 'llm', 20, 'fake-llm', true)$$,
+    'a cost already incurred past the cap is recorded as an overrun');
+SELECT pg_temp.check(EXISTS (SELECT 1 FROM audit_events WHERE action = 'cost.over_cap'),
+                     'overruns are audited');
+SELECT pg_temp.expect_ok(
     $$INSERT INTO alerts (channel_id, job_id, kind, message)
       VALUES ('kb-a', '00000000-0000-0000-0000-00000000aa01', 'budget.job', 'cap hit')$$,
     'alert recorded');
@@ -262,6 +344,17 @@ SELECT pg_temp.check(
     EXISTS (SELECT 1 FROM audit_events WHERE action = 'alert.budget.job'),
     'alerts are audited');
 SELECT pg_temp.expect_error($$DELETE FROM alerts$$, '42501', 'alerts are append-only');
+SELECT pg_temp.expect_error(
+    $$INSERT INTO alerts (channel_id, job_id, kind, message)
+      VALUES ('kb-b', '00000000-0000-0000-0000-00000000aa01', 'budget.job', 'x')$$,
+    '23503', 'an alert about a job belongs to that job''s channel');
+SELECT pg_temp.expect_error($$TRUNCATE knowledge_docs CASCADE$$, '42501', 'knowledge cannot be truncated');
+SELECT pg_temp.expect_error($$TRUNCATE owner_inputs CASCADE$$, '42501', 'inputs cannot be truncated');
+SELECT pg_temp.expect_error($$TRUNCATE job_assets$$, '42501', 'assets cannot be truncated');
+SELECT pg_temp.expect_error($$TRUNCATE alerts$$, '42501', 'alerts cannot be truncated');
+SELECT pg_temp.expect_error($$TRUNCATE channel_memory$$, '42501', 'memory cannot be truncated');
+SELECT pg_temp.expect_error($$TRUNCATE rights_register CASCADE$$, '42501',
+                            'licenses cannot be truncated');
 
 SELECT pg_temp.check(audit_chain_first_break() IS NULL, 'audit chain still verifies');
 

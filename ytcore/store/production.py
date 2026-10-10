@@ -76,12 +76,20 @@ class PostgresProductionStore:
         provider: str,
         detail: dict[str, Any],
         actor: str,
+        over_cap: bool = False,
     ) -> None:
         with self._tx(actor) as conn:
             cur = conn.execute(
-                "INSERT INTO job_costs (job_id, channel_id, kind, cost_cents, provider, detail) "
-                "SELECT id, channel_id, %s, %s, %s, %s FROM video_jobs WHERE id = %s",
-                (_COST_KINDS.get(kind, "other"), cost_cents, provider, Jsonb(detail), job_id),
+                "INSERT INTO job_costs (job_id, channel_id, kind, cost_cents, provider, detail, "
+                "over_cap) SELECT id, channel_id, %s, %s, %s, %s, %s FROM video_jobs WHERE id = %s",
+                (
+                    _COST_KINDS.get(kind, "other"),
+                    cost_cents,
+                    provider,
+                    Jsonb(detail),
+                    over_cap,
+                    job_id,
+                ),
             )
             if cur.rowcount != 1:
                 raise JobNotFound(job_id)

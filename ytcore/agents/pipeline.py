@@ -148,8 +148,9 @@ class AgentPipeline:
             if not usable:
                 raise LookupError(f"no licensed {kind} for {query!r}")
             item = usable[0]
-            res = p.stock.fetch(item)
-            meter.charge("media", res.cost_cents, provider=res.provider, what=f"stock:{kind}")
+            res = metered(
+                f"stock:{kind}", p.stock.estimate_cents(item), lambda: p.stock.fetch(item)
+            )
             return item, res
 
         return {

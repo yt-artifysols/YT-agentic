@@ -253,6 +253,9 @@ class FakeStockLibrary:
     music_license: str = FAKE_MUSIC_LICENSE
     stock_license: str = FAKE_STOCK_LICENSE
 
+    def estimate_cents(self, item: StockItem) -> int:
+        return 0  # licensed library items are prepaid
+
     def search(self, query: str, *, kind: str, limit: int = 3) -> list[StockItem]:
         lic = self.music_license if kind == "music" else self.stock_license
         media = "audio/mpeg" if kind == "music" else "video/mp4"

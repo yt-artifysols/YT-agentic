@@ -271,3 +271,35 @@ def test_jobs_keep_the_knowledge_they_started_with() -> None:
     script_requests = [r for r in kit.llm.requests if r.task.startswith("script_seo")]
     assert all("Loud and punchy" not in r.system for r in script_requests)
     assert json.dumps(manifest).count("Loud and punchy") == 0
+
+
+def test_a_cost_that_crosses_the_cap_is_recorded_as_an_overrun() -> None:
+    from ytcore.agents.costs import CostMeter
+
+    kit = Kit()
+    chan = kit.channel(job_budget_cents=10)
+    job = kit.job(chan)
+    meter = CostMeter(kit.store, job, chan, actor="agent:test")
+    meter.authorize(5, "call")
+    meter.charge("llm", 8, provider="p", what="call")
+    with pytest.raises(JobBudgetExceeded):
+        meter.charge("llm", 7, provider="p", what="call")  # estimate was too low
+    assert sum(c[3] for c in kit.store.costs) == 15  # the spend is on the books
+    assert kit.store.costs[-1][5]["over_cap"] is True
+    assert kit.store.alerts[-1][2] == "budget.job"
+    with pytest.raises(JobBudgetExceeded):
+        meter.authorize(0, "free call")  # nothing more once the cap is reached
+
+
+def test_stock_fetches_are_authorized_before_they_are_paid() -> None:
+    kit = Kit()
+    chan = kit.channel()
+    kit.idea(chan, "Index funds")
+    job = kit.job(chan)
+    artifacts = kit.p.run_stage(job, chan, "research", {})
+    artifacts |= kit.p.run_stage(job, chan, "script", artifacts)
+    spent = sum(c[3] for c in kit.store.costs)
+    kit.store.channels[chan].job_budget_cents = spent  # at the cap now
+    with pytest.raises(JobBudgetExceeded):
+        kit.p.run_stage(job, chan, "render", artifacts)
+    assert not any(a["kind"] in ("music", "stock") for a in kit.store.assets)

@@ -52,9 +52,9 @@ class AnthropicLLM:
         return max(1, math.ceil((tin * self._in + tout * self._out) / 1e6))
 
     def estimate_cents(self, request: LLMRequest) -> int:
-        # Upper bound: a conservative 3 chars per input token plus the full output allowance
-        # (thinking tokens are billed as output).
-        tin = math.ceil(len(request.system + request.user) / 3)
+        # Upper bound: at most one token per character (true for CJK text too) plus the full
+        # output allowance (thinking tokens are billed as output).
+        tin = len(request.system + request.user)
         return self._cents(tin, request.max_tokens)
 
     def complete(self, request: LLMRequest) -> LLMResponse:
