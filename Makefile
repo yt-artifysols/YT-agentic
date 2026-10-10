@@ -9,7 +9,7 @@ export PGUSER ?= ytcore
 export PGPASSWORD ?= ytcore-dev
 
 .PHONY: setup lint format typecheck test test-db test-integration test-all check-generated check-migrations \
-        audit secrets-scan up down tf-validate
+        audit secrets-scan up down tf-validate site
 
 setup:
 	uv venv .venv
@@ -60,3 +60,7 @@ down:
 tf-validate:
 	cd infra/terraform/envs/staging && terraform init -backend=false -input=false && terraform validate
 	cd infra/terraform/envs/production && terraform init -backend=false -input=false && terraform validate
+
+# Static development-status page (deployed by Vercel from site/, see vercel.json).
+site:
+	$(PY) scripts/build_site.py
