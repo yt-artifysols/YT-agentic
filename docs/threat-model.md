@@ -34,7 +34,7 @@ changes.
 |---|---|---|
 | 1 | **Stolen OAuth refresh token** | Tokens only in the secrets manager, one per channel, readable only by the gateway service account; never in code, logs, prompts or tests (`SecretValue` masks repr; gitleaks in CI and pre-commit); revoke and rotate per channel; alerts on uploads with no matching audit event. |
 | 2 | **Forged approval** | Passkey (WebAuthn) sign-in with user verification, approver role, CSRF + same-origin checks, stale-preview refusal (hash re-check); Ed25519 tokens signed only by the approval hub through a KMS-backed KeyProvider; the gateway holds only the public key; tokens bound to job, channel and content hash, expire within 72h and are single use; DB gate requires a matching non-revoked, unexpired approval row; approvals append-only. |
-| 3 | **Prompt injection via sources** | External content is wrapped and passed as data, never instructions; agents have no publish capability; any output goes through QA and human approval; agents cannot edit approved knowledge. |
+| 3 | **Prompt injection via sources** | External and owner-submitted content reaches models only inside delimited data blocks whose markers cannot be forged (`ytcore/agents/untrusted.py`); system prompts carry only trusted text; requests carry no tools and replies are parsed into strict schemas, so a model cannot call a tool; per-agent tool allowlists are enforced in code; QA flags instruction-like text and blocks it in outputs; agents have no publish or approval capability; knowledge approval requires an active human approver (DB-enforced). Tested with a deliberately gullible fake model. |
 | 4 | **Malicious media** (crafted files exploiting decoders) | Media processed in sandboxed, network-restricted workers; type/size validation; content hashing; no media processing in the approval hub or gateway. |
 | 5 | **Quota exhaustion** (YouTube API, LLM spend) | Per-channel budgets and caps on event-triggered jobs; gateway as a single quota choke point; alerts and kill switches; retries with backoff and caps. |
 | 6 | **Insider misuse** | Named approvers recorded in tokens and audit events; hash-chained, append-only audit log with tamper detection; least-privilege IAM per service; production changes via reviewed PRs. |
@@ -46,7 +46,12 @@ changes.
 ## Residual risks / follow-ups
 
 - Approval key rotation (key id claim) is not implemented yet.
-- Kill switches and per-channel budgets exist as design only; implement in later phases.
+- The research web fetcher refuses non-https and non-public addresses (SSRF); DNS rebinding
+  between the check and the connect is not fully closed (resolve-and-pin is a follow-up).
+- Real media providers (TTS, image, video, stock) are not chosen; production refuses the fakes.
+- `app.actor` is attribution, not authentication; knowledge approval therefore checks the
+  approver against active `hub_users` with the approver role, but per-service DB roles are
+  still needed to stop a compromised worker from writing as the hub.
 - Approval hub identity is passkey-based (ADR 0006); recovery for lost passkeys is an admin
   re-invite and must stay a manual, audited step.
 - Hub WebAuthn challenges and rate limits are in-process (single instance) for now.

@@ -53,6 +53,15 @@ PHASES = [
         "rate limits; approve/edit/reject/fast-lane batch; kill switches; Next.js UI with "
         "risk-sorted queue, preview, flags, sources and diff view.",
     ),
+    (
+        "Phase 2",
+        "Knowledge base, owner inputs and agents v1 (shadow mode)",
+        "done",
+        "Versioned per-channel knowledge (human-only approval in the hub), owner inputs with "
+        "provenance, research/script/media/QA agent pools with tool allowlists, untrusted-data "
+        "blocks, budgets and alerts, pgvector memory per channel, eval harness with baselines; "
+        "10 shadow jobs reach awaiting_approval and nothing publishes.",
+    ),
 ]
 
 INVARIANTS = [

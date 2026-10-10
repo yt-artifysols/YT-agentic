@@ -32,6 +32,14 @@ render and QA; a HUMAN approval is mandatory before anything is published.
 - `ytcore/approvals/keys.py` – KeyProvider (dev key file / KMS); only the hub may import it
 - `ui/hub` – Next.js approval UI; `ui/hub/e2e` – full-stack Playwright test with a virtual
   passkey (`make test-e2e`)
+- `ytcore/knowledge` – versioned per-channel knowledge (channel-bound repos, drafts only; the hub
+  approves); `ytcore/inputs` – owner inputs with provenance; `ytcore/planner/brief.py`
+- `ytcore/agents` – research, script_seo, media, qa pools: typed IO, prompts under `prompts/`
+  (versioned; changing one needs a new eval baseline), tool allowlists (`tools.py`), untrusted
+  data blocks (`untrusted.py`), metered budgets (`costs.py`), memory (pgvector), manifest
+  builder, `pipeline.py` (used by `JobActivities`), fakes in `fake.py`, Claude adapter
+- `ytcore/evals` – `python -m ytcore.evals run --agent all` vs `baselines/` (CI)
+- `ytctl` (`ytcore/cli.py`) – owner inputs and knowledge proposals
 - `tests/fakes.py` – `FakeBackend` mirroring DB rules; `tests/integration` – real Postgres
 
 ## Commands
@@ -39,6 +47,7 @@ render and QA; a HUMAN approval is mandatory before anything is published.
 - `make lint typecheck test` – ruff, mypy (strict), pytest (unit + Temporal time-skipping)
 - `make up` then `make test-db` – migrations + `tests/schema_guard_test.sql` on real Postgres
 - `make test-integration` – pipeline + gateway against real Postgres (`REQUIRE_DB=1`)
+- `make evals` – agent evals vs committed baselines
 - `make test-all` – everything CI runs (except secret scan, audit, terraform)
 - `make tf-validate` – Terraform validation
 
