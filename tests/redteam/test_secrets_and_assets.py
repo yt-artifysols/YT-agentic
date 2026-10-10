@@ -28,9 +28,11 @@ CANARIES = {
     "aws": "AKIA" + "ABCDEFGHIJKLMNOP",
     "github": "ghp_" + "Z9y8X7w6" * 5,
     "stripe": "sk_live_" + "q1w2e3r4t5y6u7i8",
-    "pem": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEI"
+    "pem": "-----BEGIN "
+    + "PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEI"
     + "x" * 30
-    + "\n-----END PRIVATE KEY-----",
+    + "\n-----END "
+    + "PRIVATE KEY-----",
     "jwt": "eyJ" + "h" * 20 + "." + "p" * 20 + "." + "s" * 10,
 }
 

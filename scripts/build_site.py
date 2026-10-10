@@ -62,6 +62,14 @@ PHASES = [
         "blocks, budgets and alerts, pgvector memory per channel, eval harness with baselines; "
         "10 shadow jobs reach awaiting_approval and nothing publishes.",
     ),
+    (
+        "Phase 3",
+        "Safety and compliance",
+        "done",
+        "Risk scoring with named reasons, deterministic policy checks, cross-channel duplicate "
+        "detection, global/cluster/channel kill switches enforced in the DB and re-checked by the "
+        "gateway, cluster circuit breaker, secret scrubbing, and a red-team suite.",
+    ),
 ]
 
 INVARIANTS = [

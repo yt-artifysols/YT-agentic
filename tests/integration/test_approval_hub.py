@@ -360,3 +360,19 @@ def test_pending_notifications_are_deduplicated(hub: Hub, channel: Callable[...,
     kinds = [n.kind for n in first]
     assert "items_waiting" in kinds and "deadline_approaching" in kinds
     assert second == []
+
+
+async def test_approval_is_refused_with_423_while_a_kill_switch_is_engaged(
+    hub: Hub, channel: Callable[..., str], sql: SQL
+) -> None:
+    ch = channel()
+    job, chash = hub.awaiting_job(ch, risk=5)
+    sql("UPDATE channels SET status = 'paused' WHERE id = %s", ch)
+    async with hub.client() as c:
+        csrf = await hub.register(c, "paula", "approver")
+        res = await c.post(f"/api/jobs/{job}/approve", json={"content_hash": chash},
+                           headers={"x-csrf-token": csrf})  # fmt: skip
+    assert res.status_code == 423, res.text
+    assert hub.store.get_state(job) == JobState.AWAITING_APPROVAL
+    assert sql("SELECT count(*) FROM approvals WHERE job_id = %s", job)[0][0] == 0
+    assert hub.signaler.sent == []

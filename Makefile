@@ -9,7 +9,7 @@ export PGUSER ?= ytcore
 export PGPASSWORD ?= ytcore-dev
 
 .PHONY: setup lint format typecheck test test-db test-integration test-all check-generated check-migrations \
-        audit secrets-scan up down tf-validate site ui-check test-e2e hub evals
+        audit secrets-scan up down tf-validate site ui-check test-e2e hub evals redteam
 
 setup:
 	uv venv .venv
@@ -47,6 +47,11 @@ test-integration:
 # prompt/model changes).
 evals:
 	$(PY) -m ytcore.evals run --agent all
+
+# Adversarial suite: forged/replayed/edited approvals, direct gateway calls, tool and injection
+# attacks, secrets in logs and prompts, hostile assets.
+redteam:
+	$(PY) -m pytest -q tests/redteam
 
 test-all: lint typecheck check-generated check-migrations test evals test-db test-integration
 

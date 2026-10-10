@@ -287,3 +287,33 @@ async def test_hub_reject_discard_is_final(env: WorkflowEnvironment) -> None:
         result = await handle.result()
     assert result.final_state == JobState.REJECTED.value
     assert h.client.uploads == []
+
+
+async def test_forged_hub_decision_and_attacker_token_never_publish(
+    env: WorkflowEnvironment,
+) -> None:
+    """Anyone who can signal the workflow still cannot publish: approval is re-verified against
+    the database record, not trusted from the signal."""
+    from tests.redteam.rig import Rig
+    from ytcore.workflow.models import HubDecision
+
+    h = Harness()
+    async with h.worker(env):
+        handle, inp = await h.start(env, origin="trigger", approval_timeout_seconds=3600)
+        await _await_state(handle, JobState.AWAITING_APPROVAL)
+        chash = h.backend.jobs[inp.job_id].content_hash or ""
+        attacker = Rig.attacker_token(inp.job_id, inp.channel_id, chash)
+        await handle.signal(
+            VideoJobWorkflow.submit_approval, ApprovalDecision(True, "mallory", attacker)
+        )
+        await handle.signal(
+            VideoJobWorkflow.hub_decision, HubDecision("approve", "mallory", chash, attacker)
+        )
+        # A validly signed token that the hub never recorded is no approval either.
+        unrecorded = h.token(inp)
+        await handle.signal(
+            VideoJobWorkflow.hub_decision, HubDecision("approve", "hub", chash, unrecorded)
+        )
+        result = await handle.result()
+    assert result.final_state == JobState.CANCELLED.value
+    assert h.client.uploads == []

@@ -39,6 +39,13 @@ render and QA; a HUMAN approval is mandatory before anything is published.
   data blocks (`untrusted.py`), metered budgets (`costs.py`), memory (pgvector), manifest
   builder, `pipeline.py` (used by `JobActivities`), fakes in `fake.py`, Claude adapter
 - `ytcore/evals` – `python -m ytcore.evals run --agent all` vs `baselines/` (CI)
+- `ytcore/safety` – risk scoring (`risk.py`, noisy-or, named reasons, stored in `job_risk`), policy
+  checks (`checks.py`, deterministic first; the LLM only judges borderline titles), cross-channel
+  duplicate detection (`duplicates.py`, only QA reads the index; no other-channel id reaches a
+  prompt), asset limits, log/prompt secret scrubber (`scrub.py`), cluster circuit breaker
+  (`breaker.py`, only ever pauses). Per-channel `SafetyPolicy` lives in the `policy` knowledge doc.
+  Kill switches (global, cluster, channel) are DB-enforced (migration 008) and re-checked by the gateway.
+- `tests/redteam` – adversarial suite (`make redteam`); must stay green
 - `ytctl` (`ytcore/cli.py`) – owner inputs and knowledge proposals
 - `tests/fakes.py` – `FakeBackend` mirroring DB rules; `tests/integration` – real Postgres
 
@@ -48,6 +55,7 @@ render and QA; a HUMAN approval is mandatory before anything is published.
 - `make up` then `make test-db` – migrations + `tests/schema_guard_test.sql` on real Postgres
 - `make test-integration` – pipeline + gateway against real Postgres (`REQUIRE_DB=1`)
 - `make evals` – agent evals vs committed baselines
+- `make redteam` – adversarial suite (forged/replayed/edited approvals, hostile assets, secrets)
 - `make test-all` – everything CI runs (except secret scan, audit, terraform)
 - `make tf-validate` – Terraform validation
 

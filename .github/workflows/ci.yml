@@ -42,6 +42,8 @@ jobs:
         run: make test
       - name: Agent evals against the committed baselines
         run: make evals
+      - name: Red-team suite
+        run: make redteam
 
   db:
     runs-on: ubuntu-latest
