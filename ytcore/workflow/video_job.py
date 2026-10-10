@@ -268,13 +268,20 @@ class VideoJobWorkflow:
             await self._to(inp, JobState.SCHEDULED)
         except ActivityError as exc:
             # Paused channel/cluster or shadow tier: never publish; cancel and re-plan.
-            return await self._end(
+            result = await self._end(
                 inp,
                 JobState.CANCELLED,
                 f"not publishable: {exc.cause or exc}",
                 content_hash=chash,
                 replanned=True,
             )
+            await workflow.execute_activity_method(
+                JobActivities.request_replan,
+                args=[inp.job_id, inp.channel_id, "channel not publishable at approval time"],
+                start_to_close_timeout=_TIMEOUT,
+                retry_policy=_RETRY,
+            )
+            return result
         if (stopped := await self._killed(inp)) is not None:
             return stopped
 

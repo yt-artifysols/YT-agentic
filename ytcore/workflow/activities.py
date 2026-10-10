@@ -122,7 +122,9 @@ class JobActivities:
         publisher: Publisher,
         assets: AssetSink,
         production: Production | None = None,
+        replanner: Callable[[str, str], object] | None = None,
     ) -> None:
+        self._replanner = replanner
         self._backend = backend
         self._publisher = publisher
         self._assets = assets
@@ -271,6 +273,8 @@ class JobActivities:
     @activity.defn
     async def request_replan(self, job_id: str, channel_id: str, reason: str) -> None:
         self.replan_requests.append((job_id, channel_id, reason))
+        if self._replanner is not None:
+            await asyncio.to_thread(self._replanner, job_id, reason)
 
     def all(self) -> list[Callable[..., Any]]:
         return [
