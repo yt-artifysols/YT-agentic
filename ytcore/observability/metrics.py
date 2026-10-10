@@ -10,6 +10,7 @@ Two sources, one naming scheme:
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import time
 from collections.abc import Awaitable, Callable
@@ -18,6 +19,7 @@ from typing import Any, ParamSpec, TypeVar
 
 import psycopg
 from opentelemetry import metrics
+from temporalio import activity
 
 from ytcore.observability.tracing import job_span
 from ytcore.store.postgres import Connect, map_db_error
@@ -39,6 +41,20 @@ def record_publish(outcome: str) -> None:
     _publish_total.add(1, {"outcome": outcome})
 
 
+async def _heartbeat_loop() -> None:
+    """Heartbeat while an activity runs so a dead worker is noticed quickly."""
+    try:
+        timeout = activity.info().heartbeat_timeout
+    except RuntimeError:  # not inside an activity (direct calls in tests)
+        return
+    if timeout is None:
+        return
+    period = max(timeout.total_seconds() / 3, 0.5)
+    while True:
+        await asyncio.sleep(period)
+        activity.heartbeat()
+
+
 def observed(name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
     """Wrap an async activity (a method whose first argument after self is the job id) in a span
     and record its duration and outcome. Applied UNDER @activity.defn."""
@@ -49,6 +65,7 @@ def observed(name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awa
             job_id = str(args[1] if len(args) > 1 else kwargs.get("job_id", "unknown"))
             started = time.perf_counter()
             outcome = "ok"
+            beat = asyncio.ensure_future(_heartbeat_loop())
             try:
                 with job_span(f"activity.{name}", job_id):
                     return await fn(*args, **kwargs)
@@ -56,6 +73,7 @@ def observed(name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awa
                 outcome = type(exc).__name__
                 raise
             finally:
+                beat.cancel()
                 labels = {"activity": name, "outcome": outcome}
                 _activity_seconds.record(time.perf_counter() - started, labels)
                 _activity_total.add(1, labels)

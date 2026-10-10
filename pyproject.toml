@@ -33,6 +33,9 @@ otel = [
   "opentelemetry-sdk>=1.27",
   "opentelemetry-exporter-otlp-proto-http>=1.27",
 ]
+gcp = [
+  "google-cloud-storage>=2.18",
+]
 youtube = [
   "google-api-python-client>=2.140",
   "google-auth>=2.30",
@@ -70,7 +73,7 @@ packages = ["ytcore"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["googleapiclient.*", "google.oauth2.*", "opentelemetry.exporter.*"]
+module = ["googleapiclient.*", "google.oauth2.*", "google.cloud.*", "opentelemetry.exporter.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
@@ -80,5 +83,8 @@ disallow_untyped_defs = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-markers = ["integration: needs a real Postgres (PG* env); skipped when unavailable unless REQUIRE_DB=1"]
+markers = [
+  "integration: needs a real Postgres (PG* env); skipped when unavailable unless REQUIRE_DB=1",
+  "chaos: kills real worker processes and restarts a local Temporal server (slower)",
+]
 asyncio_default_fixture_loop_scope = "function"

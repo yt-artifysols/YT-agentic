@@ -90,6 +90,7 @@ class VideoJobWorkflow:
             JobActivities.run_stage,
             args=[inp.job_id, inp.channel_id, stage, dict(self._artifacts)],
             start_to_close_timeout=_TIMEOUT,
+            heartbeat_timeout=timedelta(seconds=inp.heartbeat_timeout_seconds),
             retry_policy=_RETRY,
         )
         return res.artifacts
@@ -121,6 +122,7 @@ class VideoJobWorkflow:
             JobActivities.run_qa,
             args=[inp.job_id, inp.channel_id, dict(self._artifacts)],
             start_to_close_timeout=_TIMEOUT,
+            heartbeat_timeout=timedelta(seconds=inp.heartbeat_timeout_seconds),
             retry_policy=_RETRY,
         )
 
@@ -290,6 +292,7 @@ class VideoJobWorkflow:
                 JobActivities.publish,
                 args=[inp.job_id, token],
                 start_to_close_timeout=timedelta(hours=2),
+                heartbeat_timeout=timedelta(seconds=inp.heartbeat_timeout_seconds),
                 retry_policy=_PUBLISH_RETRY,
             )
         except ActivityError as exc:

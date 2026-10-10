@@ -79,6 +79,9 @@ class Settings(BaseSettings):
     media_backend: MediaBackend = "fake"
     web_backend: WebBackend = "fake"
     queue_backend: QueueBackend = "in_memory"
+    storage_local_dir: Path = Path(".assets")
+    storage_bucket: str = ""  # object_store backend: versioned bucket (see infra/terraform)
+    temporal_task_queue: str = "video-jobs"
 
     temporal_address: str = "localhost:7233"
     temporal_namespace: str = "ytcore-dev"

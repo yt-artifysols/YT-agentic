@@ -10,6 +10,9 @@ class VideoJobInput:
     origin: str  # owner | planner | trigger | experiment | derived
     approval_timeout_seconds: int = 48 * 3600
     max_qa_rework: int = 2
+    # A worker that dies mid-activity is detected after this long without a heartbeat, instead
+    # of waiting for the activity timeout (up to 2 hours for a publish).
+    heartbeat_timeout_seconds: int = 120
     parent_job_id: str | None = None
 
 

@@ -37,6 +37,8 @@ def read_verified(source: AssetSource, storage_prefix: str, digest: str) -> byte
 class ListableAssets(Protocol):
     """What the backup and restore tooling needs from an asset store."""
 
+    def put(self, storage_prefix: str, data: bytes) -> str: ...
+
     def read(self, key: str) -> bytes: ...
 
     def list_keys(self, prefix: str = "") -> list[str]: ...
@@ -109,3 +111,31 @@ class LocalDirAssetSource:
             and not p.name.endswith(".tmp")
             and p.relative_to(self._root).as_posix().startswith(prefix)
         )
+
+
+class GcsAssetSource:  # pragma: no cover - needs a real bucket (`gcp` extra)
+    """Versioned object storage (Google Cloud Storage). Same key layout as every other store:
+    channels/<channel_id>/assets/<sha256>. Objects are content-addressed, so an overwrite with
+    different bytes is impossible by construction (the key is the digest)."""
+
+    def __init__(self, bucket: str) -> None:
+        from google.cloud import storage
+
+        self._bucket = storage.Client().bucket(bucket)
+
+    def put(self, storage_prefix: str, data: bytes) -> str:
+        digest = file_digest(data)
+        self.write_raw(asset_key(storage_prefix, digest), data)
+        return digest
+
+    def read(self, key: str) -> bytes:
+        blob = self._bucket.blob(key)
+        if not blob.exists():
+            raise AssetIntegrityError(f"asset not found: {key}")
+        return bytes(blob.download_as_bytes())
+
+    def write_raw(self, key: str, data: bytes) -> None:
+        self._bucket.blob(key).upload_from_string(data, if_generation_match=None)
+
+    def list_keys(self, prefix: str = "") -> list[str]:
+        return sorted(b.name for b in self._bucket.list_blobs(prefix=prefix))
