@@ -8,7 +8,8 @@ runs in a worker thread so the activity event loop stays free.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+import contextlib
+from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
@@ -25,6 +26,7 @@ from ytcore.gateway.service import (
     UploadInProgress,
 )
 from ytcore.observability.metrics import observed
+from ytcore.scheduling.pools import PoolLimiter
 from ytcore.store.errors import (
     ApprovalGateError,
     ApprovalInvalid,
@@ -41,6 +43,13 @@ from ytcore.workflow.states import TERMINAL_STATES, JobState, can_transition
 ACTOR = "orchestrator"
 # Fake per-stage costs (cents) until real agents report their own.
 STAGE_COST_CENTS = {"render": 25}
+# Fair-share pools per stage; several pools are always taken in this order.
+STAGE_POOLS: dict[str, tuple[str, ...]] = {
+    "research": ("research",),
+    "script": ("script_seo",),
+    "render": ("media", "gpu_render"),
+    "qa": ("qa",),
+}
 
 
 class Backend(Protocol):
@@ -124,13 +133,42 @@ class JobActivities:
         assets: AssetSink,
         production: Production | None = None,
         replanner: Callable[[str, str], object] | None = None,
+        limiter: PoolLimiter | None = None,
+        pool_poll_seconds: float = 1.0,
+        pool_max_wait_seconds: float = 1500.0,
     ) -> None:
         self._replanner = replanner
+        self._limiter = limiter
+        self._pool_poll = pool_poll_seconds
+        self._pool_max_wait = pool_max_wait_seconds
         self._backend = backend
         self._publisher = publisher
         self._assets = assets
         self._production = production
         self.replan_requests: list[tuple[str, str, str]] = []
+
+    @contextlib.asynccontextmanager
+    async def _leased(self, stage: str, job_id: str) -> AsyncIterator[None]:
+        """Hold a fair-share lease on the pool(s) a stage uses, in a fixed order (no deadlocks).
+        Waits in line (the heartbeat keeps the activity alive); gives up retryably when starved."""
+        pools = STAGE_POOLS.get(stage, ())
+        if self._limiter is None or not pools:
+            yield
+            return
+        limiter, held = self._limiter, []
+        try:
+            for pool in pools:
+                waited = 0.0
+                while not await asyncio.to_thread(limiter.acquire, pool, job_id):
+                    if waited >= self._pool_max_wait:
+                        raise ApplicationError(f"pool {pool} is busy", type="PoolBusy")
+                    await asyncio.sleep(self._pool_poll)
+                    waited += self._pool_poll
+                held.append(pool)
+            yield
+        finally:
+            for pool in reversed(held):
+                await asyncio.to_thread(limiter.release, pool, job_id)
 
     async def _produce(self, fn: Callable[..., Any], *args: Any) -> Any:
         try:
@@ -159,6 +197,12 @@ class JobActivities:
     async def run_stage(
         self, job_id: str, channel_id: str, stage: str, artifacts: dict[str, str] | None = None
     ) -> StageResult:
+        async with self._leased(stage, job_id):
+            return await self._run_stage(job_id, channel_id, stage, artifacts)
+
+    async def _run_stage(
+        self, job_id: str, channel_id: str, stage: str, artifacts: dict[str, str] | None
+    ) -> StageResult:
         if self._production is not None:
             produced = await self._produce(
                 self._production.run_stage, job_id, channel_id, stage, dict(artifacts or {})
@@ -183,6 +227,12 @@ class JobActivities:
     @observed("run_qa")
     async def run_qa(
         self, job_id: str, channel_id: str, artifacts: dict[str, str] | None = None
+    ) -> QAReport:
+        async with self._leased("qa", job_id):
+            return await self._run_qa(job_id, channel_id, artifacts)
+
+    async def _run_qa(
+        self, job_id: str, channel_id: str, artifacts: dict[str, str] | None
     ) -> QAReport:
         if self._production is not None:
             report: QAReport = await self._produce(

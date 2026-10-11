@@ -182,11 +182,14 @@ def test_unstarted_plans_are_healed_on_the_next_run(
             channel_id: str,
             approval_timeout_seconds: int,
             approval_deadline: Any = None,
+            cluster_id: str | None = None,
         ) -> None:
             Flaky.calls += 1
             if Flaky.calls == 1:
                 raise RuntimeError("temporal down")
-            super().start(job_id, channel_id, approval_timeout_seconds, approval_deadline)
+            super().start(
+                job_id, channel_id, approval_timeout_seconds, approval_deadline, cluster_id
+            )
 
     starter = Flaky()
     planner = DailyPlanner(repo, starter)

@@ -183,9 +183,10 @@ class WorkflowStarter(Protocol):
         channel_id: str,
         approval_timeout_seconds: int,
         approval_deadline: datetime | None = None,
+        cluster_id: str | None = None,
     ) -> None:
-        """Start the job's workflow with its ABSOLUTE approval deadline. Must be idempotent for
-        a job id that already runs."""
+        """Start the job's workflow (through its cluster's supervisor when there is one) with its
+        ABSOLUTE approval deadline. Must be idempotent for a job id that already runs."""
         ...
 
 
@@ -202,6 +203,7 @@ class FakeWorkflowStarter:
         channel_id: str,
         approval_timeout_seconds: int,
         approval_deadline: datetime | None = None,
+        cluster_id: str | None = None,
     ) -> None:
         if all(j != job_id for j, _, _ in self.started):
             self.started.append((job_id, channel_id, approval_timeout_seconds))
@@ -334,13 +336,15 @@ class PlanRepository:
             ).fetchone()
         return row is not None
 
-    def unstarted(self) -> list[tuple[str, str, str, datetime]]:
+    def unstarted(self) -> list[tuple[str, str, str, datetime, str | None]]:
         with self._tx() as conn:
             rows = conn.execute(
-                "SELECT id::text, job_id::text, channel_id, approval_deadline FROM daily_plans "
-                "WHERE workflow_started_at IS NULL AND status = 'active' ORDER BY slot_at"
+                "SELECT p.id::text, p.job_id::text, p.channel_id, p.approval_deadline, "
+                "c.cluster_id "
+                "FROM daily_plans p JOIN channels c ON c.id = p.channel_id "
+                "WHERE p.workflow_started_at IS NULL AND p.status = 'active' ORDER BY p.slot_at"
             ).fetchall()
-        return [(r[0], r[1], r[2], r[3]) for r in rows]
+        return [(r[0], r[1], r[2], r[3], r[4]) for r in rows]
 
     def mark_started(self, plan_id: str) -> None:
         with self._tx() as conn:
@@ -493,7 +497,9 @@ class DailyPlanner:
             log.info("replanned %s for %s: %s", channel_id, plan_date, reason)
 
     def _start_pending(self, run: PlanRun, now: datetime) -> None:
-        for plan_id, job_id, channel_id, deadline in self._repo.unstarted():
-            self._starter.start(job_id, channel_id, self._timeout(deadline, now), deadline)
+        for plan_id, job_id, channel_id, deadline, cluster_id in self._repo.unstarted():
+            self._starter.start(
+                job_id, channel_id, self._timeout(deadline, now), deadline, cluster_id
+            )
             self._repo.mark_started(plan_id)
             run.started.append(job_id)

@@ -96,7 +96,7 @@ class VideoJobWorkflow:
         res = await workflow.execute_activity_method(
             JobActivities.run_stage,
             args=[inp.job_id, inp.channel_id, stage, dict(self._artifacts)],
-            start_to_close_timeout=_TIMEOUT,
+            start_to_close_timeout=timedelta(seconds=inp.stage_timeout_seconds),
             heartbeat_timeout=timedelta(seconds=inp.heartbeat_timeout_seconds),
             retry_policy=_RETRY,
         )
@@ -128,7 +128,7 @@ class VideoJobWorkflow:
         return await workflow.execute_activity_method(
             JobActivities.run_qa,
             args=[inp.job_id, inp.channel_id, dict(self._artifacts)],
-            start_to_close_timeout=_TIMEOUT,
+            start_to_close_timeout=timedelta(seconds=inp.stage_timeout_seconds),
             heartbeat_timeout=timedelta(seconds=inp.heartbeat_timeout_seconds),
             retry_policy=_RETRY,
         )

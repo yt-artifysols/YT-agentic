@@ -141,6 +141,7 @@ CREATE TABLE pool_waiters (
     cluster_id  text,
     priority_at timestamptz NOT NULL,
     since       timestamptz NOT NULL DEFAULT now(),
+    seen_at     timestamptz NOT NULL DEFAULT now(),   -- refreshed while the job waits
     PRIMARY KEY (pool, job_id)
 );
 
@@ -157,5 +158,17 @@ CREATE TABLE pool_leases (
 CREATE INDEX pool_leases_active_idx ON pool_leases (pool) WHERE released_at IS NULL;
 CREATE UNIQUE INDEX pool_leases_one_per_job_pool
     ON pool_leases (pool, job_id) WHERE released_at IS NULL;
+
+-- Latest health report of each cluster supervisor (read by the approval hub).
+CREATE TABLE cluster_health (
+    cluster_id    text PRIMARY KEY REFERENCES clusters (id),
+    reported_at   timestamptz NOT NULL DEFAULT now(),
+    pending       integer NOT NULL CHECK (pending >= 0),
+    running       integer NOT NULL CHECK (running >= 0),
+    finished      integer NOT NULL CHECK (finished >= 0),
+    failed        integer NOT NULL CHECK (failed >= 0),
+    budget_held   boolean NOT NULL DEFAULT false,
+    detail        jsonb NOT NULL DEFAULT '{}'::jsonb
+);
 
 COMMIT;

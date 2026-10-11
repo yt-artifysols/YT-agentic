@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import psycopg
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
 from temporalio.client import Client
@@ -39,9 +40,12 @@ from ytcore.gateway.service import PublishService
 from ytcore.planner.daily import DailyPlanner, PlanRepository
 from ytcore.planner.temporal import TemporalStarter
 from ytcore.safety.scrub import install_log_scrubber
+from ytcore.scheduling.cluster import PostgresClusterState
+from ytcore.scheduling.pools import PoolLimiter
 from ytcore.secrets.provider import SecretRef, SecretsProvider
 from ytcore.store.postgres import PostgresStore
 from ytcore.workflow.activities import JobActivities
+from ytcore.workflow.supervisor import ClusterActivities, ClusterSupervisorWorkflow
 from ytcore.workflow.video_job import VideoJobWorkflow
 
 log = logging.getLogger(__name__)
@@ -51,6 +55,7 @@ log = logging.getLogger(__name__)
 class Stack:
     store: PostgresStore
     activities: JobActivities
+    cluster: ClusterActivities
     plans: PlanRepository
     assets: ListableAssets
     conninfo: str
@@ -100,14 +105,21 @@ def build_stack(
         upload_units=settings.youtube_upload_quota_units,
         status_units=settings.youtube_status_quota_units,
     )
+
+    def connect() -> psycopg.Connection[Any]:
+        return psycopg.connect(dsn, autocommit=True)
+
     activities = JobActivities(
         store,
         publisher,
         assets,
         pipeline,
         replanner=lambda job, reason: plans.request_replan(job, reason),
+        limiter=PoolLimiter(connect),
     )
-    return Stack(store, activities, plans, assets, dsn)
+    state = PostgresClusterState(connect)
+    cluster = ClusterActivities(state.limits, state.report)
+    return Stack(store, activities, cluster, plans, assets, dsn)
 
 
 async def connect(settings: Settings) -> Client:
@@ -119,8 +131,8 @@ async def run_worker(settings: Settings, stack: Stack, client: Client | None = N
     worker = Worker(
         client,
         task_queue=settings.temporal_task_queue,
-        workflows=[VideoJobWorkflow],
-        activities=stack.activities.all(),
+        workflows=[VideoJobWorkflow, ClusterSupervisorWorkflow],
+        activities=[*stack.activities.all(), *stack.cluster.all()],
     )
     await worker.run()
 
@@ -128,7 +140,9 @@ async def run_worker(settings: Settings, stack: Stack, client: Client | None = N
 async def plan_once(settings: Settings, stack: Stack, client: Client | None = None) -> Any:
     client = client or await connect(settings)
     loop = asyncio.get_running_loop()
-    starter = TemporalStarter(client, loop, settings.temporal_task_queue)
+    starter = TemporalStarter(
+        client, loop, settings.temporal_task_queue, supervised=settings.cluster_supervisors
+    )
     planner = DailyPlanner(stack.plans, starter)
     return await asyncio.to_thread(planner.run)
 

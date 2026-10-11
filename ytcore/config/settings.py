@@ -82,6 +82,9 @@ class Settings(BaseSettings):
     storage_local_dir: Path = Path(".assets")
     storage_bucket: str = ""  # object_store backend: versioned bucket (see infra/terraform)
     temporal_task_queue: str = "video-jobs"
+    # Hand planned jobs to per-cluster supervisors (concurrency, budget, health) instead of
+    # starting each job workflow directly.
+    cluster_supervisors: bool = True
 
     temporal_address: str = "localhost:7233"
     temporal_namespace: str = "ytcore-dev"

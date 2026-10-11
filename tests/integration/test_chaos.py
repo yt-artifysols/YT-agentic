@@ -169,12 +169,12 @@ async def test_worker_killed_mid_render_resumes_and_publishes_exactly_once(
 
     os.kill(slow.pid, signal.SIGKILL)  # the worker dies mid-render
     slow.wait(timeout=10)
-    assert store.get_state(job) in {JobState.RENDERING, JobState.SCRIPTING}
+    assert store.get_state(job) == JobState.RENDERING  # killed with the render in flight
 
     chaos.spawn("worker")  # a replacement worker picks the job up after the heartbeat timeout
-    await _await_state(handle, JobState.AWAITING_APPROVAL, 90)
+    await _await_state(handle, JobState.AWAITING_APPROVAL, 150)
     await handle.signal(VideoJobWorkflow.submit_approval, _approve_signal(chaos, store, job, ch))
-    result = await asyncio.wait_for(handle.result(), 90)
+    result = await asyncio.wait_for(handle.result(), 150)
 
     assert result.final_state == JobState.LIVE.value
     assert len(chaos.uploaded()) == 1
@@ -207,7 +207,7 @@ async def test_temporal_restart_mid_job_resumes_without_duplicates(
     await _await_state(handle, JobState.AWAITING_APPROVAL, 60)
 
     await handle.signal(VideoJobWorkflow.submit_approval, _approve_signal(chaos, store, job, ch))
-    result = await asyncio.wait_for(handle.result(), 90)
+    result = await asyncio.wait_for(handle.result(), 150)
     assert result.final_state == JobState.LIVE.value
     assert len(chaos.uploaded()) == 1
     assert sql("SELECT count(*) FROM uploads WHERE job_id = %s", job)[0][0] == 1
