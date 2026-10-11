@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
+import psycopg
 
 from tests.harness import Keys, drive_to_awaiting
 from tests.softauthn import SoftAuthenticator
@@ -18,6 +19,7 @@ from ytcore.approvals.service.repo import HubRepository, User
 from ytcore.approvals.service.security import CeremonyStore, RateLimiter, SessionManager
 from ytcore.approvals.service.settings import HubSettings
 from ytcore.approvals.service.signals import FakeSignaler, WorkflowSignaler
+from ytcore.channels.rollout import RolloutService
 from ytcore.gateway.assets import InMemoryAssetSource
 from ytcore.inputs.store import PostgresInputs
 from ytcore.knowledge.store import PostgresKnowledge
@@ -122,6 +124,7 @@ def build_hub(
             ceremonies=CeremonyStore(),
             limiter=RateLimiter(),
             inputs=PostgresInputs.from_conninfo(conninfo),
+            rollout=RolloutService(lambda: psycopg.connect(conninfo, autocommit=True)),
             knowledge=PostgresKnowledge.from_conninfo(conninfo),
         )
     )

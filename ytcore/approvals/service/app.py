@@ -6,7 +6,7 @@ import json
 import secrets
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response
@@ -41,6 +41,7 @@ from ytcore.approvals.service.security import (
     require_role,
 )
 from ytcore.approvals.service.settings import HubSettings
+from ytcore.channels.rollout import GateNotMet, RolloutService
 from ytcore.gateway.assets import AssetSource, read_verified
 from ytcore.inputs.models import InputKind, OwnerInput
 from ytcore.inputs.store import InputStore
@@ -50,6 +51,7 @@ from ytcore.store.errors import (
     InputRejected,
     KnowledgeForbidden,
     KnowledgeStale,
+    RolloutRefused,
     StoreError,
 )
 
@@ -191,6 +193,64 @@ class AlertOut(BaseModel):
     job_id: str | None
 
 
+class ClusterOut(BaseModel):
+    id: str
+    display_name: str
+    niche: str
+    status: str
+    live_enabled: bool
+    live_since: datetime | None
+    requires_cluster: str | None
+    gate_days: int
+    max_concurrent_jobs: int
+    channels: int
+    awaiting_approval: int
+    oldest_waiting_since: datetime | None
+    health: dict[str, Any] | None
+
+
+class ScorecardOut(BaseModel):
+    channel_id: str
+    cluster_id: str | None
+    score_date: date
+    jobs_planned: int
+    jobs_approved: int
+    jobs_rejected: int
+    approval_rate: float | None
+    policy_flags: int
+    videos_published: int
+    cost_cents: int
+    cost_per_video: float | None
+    avg_ctr: float | None
+    avg_retention: float | None
+    views: int
+    revenue_cents: int | None
+
+
+class GateOut(BaseModel):
+    cluster_id: str
+    live: bool
+    live_days: float
+    required_days: int
+    breaker_trips: int
+    stuck_or_plan_alerts: int
+    failed_uploads: int
+    pending_uploads: int
+    decisions: int
+    rejection_rate: float | None
+    scorecard_days: int
+    problems: list[str]
+    ok: bool
+
+
+class SignoffIn(BaseModel):
+    note: str = Field(min_length=20, max_length=2000)
+
+
+class SignoffOut(BaseModel):
+    id: int
+
+
 class KillSwitchIn(BaseModel):
     paused: bool
     reason: str = Field(default="", max_length=500)
@@ -323,6 +383,7 @@ class HubDeps:
     ceremonies: CeremonyStore
     limiter: RateLimiter
     inputs: InputStore | None = None
+    rollout: RolloutService | None = None
     knowledge: Any = None  # channel-bound knowledge repositories (proposals only)
 
 
@@ -572,6 +633,9 @@ def create_app(deps: HubDeps) -> FastAPI:
         min_risk: Annotated[int | None, Query(ge=0, le=100)] = None,
         max_risk: Annotated[int | None, Query(ge=0, le=100)] = None,
         fast_lane: bool = False,
+        sort: Literal["risk", "deadline", "channel", "cluster"] = "risk",
+        limit: Annotated[int, Query(ge=1, le=1000)] = 500,
+        offset: Annotated[int, Query(ge=0)] = 0,
     ) -> list[QueueItemOut]:
         items = await asyncio.to_thread(
             deps.repo.queue,
@@ -580,8 +644,75 @@ def create_app(deps: HubDeps) -> FastAPI:
             min_risk=min_risk,
             max_risk=max_risk,
             fast_lane_only=fast_lane,
+            sort=sort,
+            limit=limit,
+            offset=offset,
         )
         return [QueueItemOut(**i.__dict__) for i in items]
+
+    def rollout_service() -> RolloutService:
+        if deps.rollout is None:
+            raise HTTPException(503, "rollout is not configured")
+        return deps.rollout
+
+    @api.get(
+        "/clusters", tags=["scale"], response_model=list[ClusterOut], dependencies=[read_limit]
+    )
+    async def clusters(ctx: Session) -> list[ClusterOut]:
+        rows = await asyncio.to_thread(rollout_service().clusters)
+        return [ClusterOut(**r) for r in rows]
+
+    @api.get(
+        "/scorecards", tags=["scale"], response_model=list[ScorecardOut], dependencies=[read_limit]
+    )
+    async def scorecards(
+        ctx: Session,
+        channel: str | None = None,
+        cluster: str | None = None,
+        days: Annotated[int, Query(ge=1, le=90)] = 14,
+    ) -> list[ScorecardOut]:
+        rows = await asyncio.to_thread(
+            rollout_service().scorecards, channel=channel, cluster=cluster, days=days
+        )
+        return [ScorecardOut(**r) for r in rows]
+
+    @api.get(
+        "/rollout/{cluster}/gate", tags=["scale"], response_model=GateOut, dependencies=[read_limit]
+    )
+    async def rollout_gate(cluster: str, ctx: Session) -> GateOut:
+        require_role(ctx, "operator", "admin")
+        try:
+            report = await asyncio.to_thread(rollout_service().gate, cluster)
+        except ValueError:
+            raise HTTPException(404, "cluster not found") from None
+        return GateOut(**report.to_json())
+
+    @api.post(
+        "/rollout/{cluster}/signoff", tags=["scale"], response_model=SignoffOut,
+        dependencies=[write_limit],
+    )  # fmt: skip
+    async def rollout_signoff(cluster: str, body: SignoffIn, ctx: Session) -> SignoffOut:
+        admin = require_role(ctx, "admin")
+        try:
+            sid = await asyncio.to_thread(
+                rollout_service().sign_off, cluster, admin.username, body.note
+            )
+        except GateNotMet as exc:
+            raise HTTPException(409, f"gate not met: {exc}") from None
+        except ValueError:
+            raise HTTPException(404, "cluster not found") from None
+        return SignoffOut(id=sid)
+
+    @api.post(
+        "/rollout/{cluster}/enable", tags=["scale"], response_model=Ok, dependencies=[write_limit]
+    )
+    async def rollout_enable(cluster: str, ctx: Session) -> Ok:
+        admin = require_role(ctx, "admin")
+        try:
+            await asyncio.to_thread(rollout_service().enable, cluster, admin.username)
+        except RolloutRefused as exc:
+            raise HTTPException(409, str(exc)) from None
+        return Ok()
 
     @api.get("/jobs/{job_id}", response_model=PreviewOut, dependencies=[read_limit])
     async def preview(job_id: str, ctx: Session) -> PreviewOut:

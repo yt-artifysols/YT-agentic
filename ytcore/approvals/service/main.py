@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Any
 
+import psycopg
 from fastapi import FastAPI
 
 from ytcore.approvals.keys import KeyProvider, KmsKeyProvider, LocalFileKeyProvider
@@ -21,6 +22,7 @@ from ytcore.approvals.service.security import CeremonyStore, RateLimiter, Sessio
 from ytcore.approvals.service.settings import HubSettings
 from ytcore.approvals.service.signals import FakeSignaler, TemporalSignaler, WorkflowSignaler
 from ytcore.approvals.token import ApprovalSigner, ApprovalVerifier
+from ytcore.channels.rollout import RolloutService
 from ytcore.gateway.assets import AssetSource, InMemoryAssetSource
 from ytcore.inputs.store import PostgresInputs
 from ytcore.knowledge.store import PostgresKnowledge
@@ -94,6 +96,7 @@ def create_hub_app(
         ceremonies=CeremonyStore(),
         limiter=RateLimiter(),
         inputs=PostgresInputs.from_conninfo(conninfo),
+        rollout=RolloutService(lambda: psycopg.connect(conninfo, autocommit=True)),
         knowledge=PostgresKnowledge.from_conninfo(conninfo),
     )
     return create_app(deps)

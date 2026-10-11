@@ -224,6 +224,110 @@
         "title": "BatchOut",
         "type": "object"
       },
+      "ClusterOut": {
+        "properties": {
+          "awaiting_approval": {
+            "title": "Awaiting Approval",
+            "type": "integer"
+          },
+          "channels": {
+            "title": "Channels",
+            "type": "integer"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "gate_days": {
+            "title": "Gate Days",
+            "type": "integer"
+          },
+          "health": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Health"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "live_enabled": {
+            "title": "Live Enabled",
+            "type": "boolean"
+          },
+          "live_since": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Live Since"
+          },
+          "max_concurrent_jobs": {
+            "title": "Max Concurrent Jobs",
+            "type": "integer"
+          },
+          "niche": {
+            "title": "Niche",
+            "type": "string"
+          },
+          "oldest_waiting_since": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oldest Waiting Since"
+          },
+          "requires_cluster": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requires Cluster"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "display_name",
+          "niche",
+          "status",
+          "live_enabled",
+          "live_since",
+          "requires_cluster",
+          "gate_days",
+          "max_concurrent_jobs",
+          "channels",
+          "awaiting_approval",
+          "oldest_waiting_since",
+          "health"
+        ],
+        "title": "ClusterOut",
+        "type": "object"
+      },
       "CredentialIn": {
         "properties": {
           "credential": {
@@ -349,6 +453,89 @@
           "manifest_version"
         ],
         "title": "EditOut",
+        "type": "object"
+      },
+      "GateOut": {
+        "properties": {
+          "breaker_trips": {
+            "title": "Breaker Trips",
+            "type": "integer"
+          },
+          "cluster_id": {
+            "title": "Cluster Id",
+            "type": "string"
+          },
+          "decisions": {
+            "title": "Decisions",
+            "type": "integer"
+          },
+          "failed_uploads": {
+            "title": "Failed Uploads",
+            "type": "integer"
+          },
+          "live": {
+            "title": "Live",
+            "type": "boolean"
+          },
+          "live_days": {
+            "title": "Live Days",
+            "type": "number"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "pending_uploads": {
+            "title": "Pending Uploads",
+            "type": "integer"
+          },
+          "problems": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Problems",
+            "type": "array"
+          },
+          "rejection_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejection Rate"
+          },
+          "required_days": {
+            "title": "Required Days",
+            "type": "integer"
+          },
+          "scorecard_days": {
+            "title": "Scorecard Days",
+            "type": "integer"
+          },
+          "stuck_or_plan_alerts": {
+            "title": "Stuck Or Plan Alerts",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cluster_id",
+          "live",
+          "live_days",
+          "required_days",
+          "breaker_trips",
+          "stuck_or_plan_alerts",
+          "failed_uploads",
+          "pending_uploads",
+          "decisions",
+          "rejection_rate",
+          "scorecard_days",
+          "problems",
+          "ok"
+        ],
+        "title": "GateOut",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -1275,6 +1462,160 @@
         "title": "RejectIn",
         "type": "object"
       },
+      "ScorecardOut": {
+        "properties": {
+          "approval_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Rate"
+          },
+          "avg_ctr": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Ctr"
+          },
+          "avg_retention": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Retention"
+          },
+          "channel_id": {
+            "title": "Channel Id",
+            "type": "string"
+          },
+          "cluster_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cluster Id"
+          },
+          "cost_cents": {
+            "title": "Cost Cents",
+            "type": "integer"
+          },
+          "cost_per_video": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Per Video"
+          },
+          "jobs_approved": {
+            "title": "Jobs Approved",
+            "type": "integer"
+          },
+          "jobs_planned": {
+            "title": "Jobs Planned",
+            "type": "integer"
+          },
+          "jobs_rejected": {
+            "title": "Jobs Rejected",
+            "type": "integer"
+          },
+          "policy_flags": {
+            "title": "Policy Flags",
+            "type": "integer"
+          },
+          "revenue_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revenue Cents"
+          },
+          "score_date": {
+            "format": "date",
+            "title": "Score Date",
+            "type": "string"
+          },
+          "videos_published": {
+            "title": "Videos Published",
+            "type": "integer"
+          },
+          "views": {
+            "title": "Views",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "channel_id",
+          "cluster_id",
+          "score_date",
+          "jobs_planned",
+          "jobs_approved",
+          "jobs_rejected",
+          "approval_rate",
+          "policy_flags",
+          "videos_published",
+          "cost_cents",
+          "cost_per_video",
+          "avg_ctr",
+          "avg_retention",
+          "views",
+          "revenue_cents"
+        ],
+        "title": "ScorecardOut",
+        "type": "object"
+      },
+      "SignoffIn": {
+        "properties": {
+          "note": {
+            "maxLength": 2000,
+            "minLength": 20,
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "note"
+        ],
+        "title": "SignoffIn",
+        "type": "object"
+      },
+      "SignoffOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "SignoffOut",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -1858,6 +2199,32 @@
         ]
       }
     },
+    "/api/clusters": {
+      "get": {
+        "operationId": "clusters_api_clusters_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ClusterOut"
+                  },
+                  "title": "Response Clusters Api Clusters Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Clusters",
+        "tags": [
+          "approvals",
+          "scale"
+        ]
+      }
+    },
     "/api/controls": {
       "get": {
         "operationId": "controls_api_controls_get",
@@ -2070,6 +2437,45 @@
               "default": false,
               "title": "Fast Lane",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "risk",
+              "enum": [
+                "risk",
+                "deadline",
+                "channel",
+                "cluster"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
             }
           }
         ],
@@ -2589,6 +2995,227 @@
         "summary": "Knowledge Reject",
         "tags": [
           "knowledge"
+        ]
+      }
+    },
+    "/api/rollout/{cluster}/enable": {
+      "post": {
+        "operationId": "rollout_enable_api_rollout__cluster__enable_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cluster",
+            "required": true,
+            "schema": {
+              "title": "Cluster",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rollout Enable",
+        "tags": [
+          "approvals",
+          "scale"
+        ]
+      }
+    },
+    "/api/rollout/{cluster}/gate": {
+      "get": {
+        "operationId": "rollout_gate_api_rollout__cluster__gate_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cluster",
+            "required": true,
+            "schema": {
+              "title": "Cluster",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rollout Gate",
+        "tags": [
+          "approvals",
+          "scale"
+        ]
+      }
+    },
+    "/api/rollout/{cluster}/signoff": {
+      "post": {
+        "operationId": "rollout_signoff_api_rollout__cluster__signoff_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cluster",
+            "required": true,
+            "schema": {
+              "title": "Cluster",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignoffIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignoffOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rollout Signoff",
+        "tags": [
+          "approvals",
+          "scale"
+        ]
+      }
+    },
+    "/api/scorecards": {
+      "get": {
+        "operationId": "scorecards_api_scorecards_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Channel"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cluster",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cluster"
+            }
+          },
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 14,
+              "maximum": 90,
+              "minimum": 1,
+              "title": "Days",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ScorecardOut"
+                  },
+                  "title": "Response Scorecards Api Scorecards Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Scorecards",
+        "tags": [
+          "approvals",
+          "scale"
         ]
       }
     }

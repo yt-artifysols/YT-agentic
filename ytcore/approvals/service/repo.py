@@ -160,7 +160,18 @@ class HubRepository:
         min_risk: int | None = None,
         max_risk: int | None = None,
         fast_lane_only: bool = False,
+        sort: str = "risk",
+        limit: int = 500,
+        offset: int = 0,
     ) -> list[QueueItem]:
+        order = {
+            "risk": "coalesce(qa.risk_score, 100) DESC, j.approval_deadline ASC NULLS LAST",
+            "deadline": "j.approval_deadline ASC NULLS LAST, coalesce(qa.risk_score, 100) DESC",
+            "channel": "j.channel_id, j.approval_deadline ASC NULLS LAST",
+            "cluster": "c.cluster_id NULLS LAST, j.approval_deadline ASC NULLS LAST",
+        }.get(sort)
+        if order is None:
+            raise ValueError(f"unknown sort {sort!r}")
         sql = (
             "SELECT j.id::text, j.channel_id, c.cluster_id, "
             "coalesce(j.manifest->'metadata'->>'title', ''), j.origin, j.content_hash, "
@@ -173,9 +184,16 @@ class HubRepository:
             " AND (%(channel)s::text IS NULL OR j.channel_id = %(channel)s)"
             " AND (%(min)s::int IS NULL OR coalesce(qa.risk_score, 100) >= %(min)s)"
             " AND (%(max)s::int IS NULL OR coalesce(qa.risk_score, 100) <= %(max)s)"
-            " ORDER BY coalesce(qa.risk_score, 100) DESC, j.approval_deadline ASC NULLS LAST"
+            f" ORDER BY {order}, j.id LIMIT %(limit)s OFFSET %(offset)s"
         )
-        params = {"cluster": cluster, "channel": channel, "min": min_risk, "max": max_risk}
+        params = {
+            "cluster": cluster,
+            "channel": channel,
+            "min": min_risk,
+            "max": max_risk,
+            "limit": max(1, min(limit, 1000)),
+            "offset": max(0, offset),
+        }
         with self._tx("hub:reader") as conn:
             rows = conn.execute(sql, params).fetchall()
         items = [
