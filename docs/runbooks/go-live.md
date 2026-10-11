@@ -11,11 +11,12 @@ Do not go live with real credentials until each of these is closed (ADR 0012):
 - [x] **Per-service database roles** (migration 014). Setup per environment, as the database
       admin: create four logins (Cloud SQL IAM users, one per service account), then
       `ytctl ops grant-role --role yt_hub --login <hub login>` (and `yt_worker`, `yt_gateway`,
-      `yt_ops`). Store each login's connection string only in its own `database-url-<service>`
+      `yt_ops`, `yt_backup`). Store each login's connection string only in its own `database-url-<service>`
       secret. `ytctl ops preflight` fails if one login holds two roles or is a superuser.
-- [ ] Supply chain: lockfile with hashes, actions and hooks pinned by SHA, image digests.
-- [ ] SSRF: pin the resolved IP in the web fetcher (DNS rebinding); total download deadline.
-- [ ] Storage: per-channel IAM conditions or no delete for the worker.
+- [x] Supply chain: hash-locked dependencies (`make lock`), actions and hooks pinned by SHA,
+      image digests enforced in Terraform, Dockerfile installs only from the lock.
+- [x] SSRF: the web fetcher resolves once and connects to that address; total deadline.
+- [x] Storage: the worker can create and read assets only (no delete, no overwrite).
 - [ ] Render workers sandboxed with restricted egress before real media providers are enabled.
 Closed in Phase 7: Cloud KMS signing provider and Terraform, hub production settings and asset
 source, auth rate limiter, explicit "I reviewed this version" step before approve.

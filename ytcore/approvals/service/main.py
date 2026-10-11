@@ -15,6 +15,7 @@ from fastapi import FastAPI
 
 from ytcore.approvals.keys import KeyProvider, KmsKeyProvider, LocalFileKeyProvider
 from ytcore.approvals.service.app import HubDeps, create_app
+from ytcore.approvals.service.console import ConsoleRepository
 from ytcore.approvals.service.hub import ApprovalHub
 from ytcore.approvals.service.notify import Notifier, build_notifier
 from ytcore.approvals.service.repo import HubRepository
@@ -97,6 +98,7 @@ def create_hub_app(
         limiter=RateLimiter(),
         inputs=PostgresInputs.from_conninfo(conninfo),
         rollout=RolloutService(lambda: psycopg.connect(conninfo, autocommit=True)),
+        console=ConsoleRepository(lambda: psycopg.connect(conninfo, autocommit=True)),
         knowledge=PostgresKnowledge.from_conninfo(conninfo),
     )
     return create_app(deps)

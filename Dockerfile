@@ -3,16 +3,20 @@
 #   gateway  uvicorn ytcore.gateway.main:app
 #   worker   python -m ytcore.workflow.worker run
 #   ops jobs python -m ytcore.<job> ...
-# Build with a digest-pinned base in CI; the image holds no secrets (they are resolved at run
+# Build with `--build-arg PYTHON_IMAGE=python:3.12-slim@sha256:<digest>`: the base image has no
+# default on purpose, so an unpinned build fails. Dependencies install only from the hash-locked
+# requirements-runtime.lock (`make lock`); the image holds no secrets (they are resolved at run
 # time through the SecretsProvider) and runs as a non-root user.
-ARG PYTHON_IMAGE=python:3.12-slim
+ARG PYTHON_IMAGE
 FROM ${PYTHON_IMAGE} AS build
 WORKDIR /src
+COPY requirements-runtime.lock ./
+RUN pip install --no-cache-dir --require-hashes --prefix=/install -r requirements-runtime.lock
 COPY pyproject.toml README.md ./
 COPY ytcore ./ytcore
-ARG EXTRAS=gcp,youtube,agents,hub,gateway,otel
-RUN pip install --no-cache-dir --prefix=/install ".[${EXTRAS}]"
+RUN pip install --no-cache-dir --no-deps --prefix=/install .
 
+ARG PYTHON_IMAGE
 FROM ${PYTHON_IMAGE}
 COPY --from=build /install /usr/local
 RUN useradd --system --uid 10001 --no-create-home app

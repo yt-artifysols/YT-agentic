@@ -70,6 +70,8 @@ class HubSettings(BaseSettings):
                 problems.append("rp_id must be the origin host or a parent domain of it")
             if not self.cookie_secure:
                 problems.append("cookie_secure must be true")
+            if not self.require_stepup:
+                problems.append("require_stepup must be true")
             if self.key_backend != "kms":
                 problems.append("key_backend must be kms")
             if self.signaler_backend == "fake":

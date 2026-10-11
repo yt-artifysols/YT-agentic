@@ -211,3 +211,90 @@ def test_the_ops_role_cannot_confirm_a_promotion(
     with pytest.raises(StoreError, match="42501"):
         ops.confirm(rec.id, "rolesadmin2", "an ops job trying to promote", recheck=False)
     assert sql("SELECT approval_tier FROM channels WHERE id = %s", ch)[0][0] == 1
+
+
+# ------------------------------------------------- hardening found by the Phase 8 review
+
+
+@pytest.mark.parametrize("table", ["clusters", "channels"])
+def test_the_ops_role_can_pause_but_never_resume(
+    database: str, channel: Callable[..., str], sql: SQL, table: str
+) -> None:
+    ch = channel()
+    ident = (
+        ch
+        if table == "channels"
+        else sql("SELECT cluster_id FROM channels WHERE id = %s", ch)[0][0]
+    )
+    run_as(database, "yt_ops", f"UPDATE {table} SET status = 'paused' WHERE id = %s", ident)  # noqa: S608
+    with pytest.raises(psycopg.errors.InsufficientPrivilege, match="only the hub can resume"):
+        run_as(database, "yt_ops", f"UPDATE {table} SET status = 'active' WHERE id = %s", ident)  # noqa: S608
+    for role in ("yt_worker", "yt_gateway"):
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            run_as(database, role, f"UPDATE {table} SET status = 'active' WHERE id = %s", ident)  # noqa: S608
+    run_as(database, "yt_hub", f"UPDATE {table} SET status = 'active' WHERE id = %s", ident)  # noqa: S608
+    assert sql(f"SELECT status FROM {table} WHERE id = %s", ident) == [("active",)]  # noqa: S608
+
+
+@pytest.mark.parametrize(
+    "forbidden",
+    [
+        "INSERT INTO uploads (job_id, channel_id, idempotency_key, status) "
+        "VALUES (gen_random_uuid(), 'c', 'k', 'pending')",
+        "UPDATE uploads SET status = 'uploaded', youtube_video_id = 'forged'",
+        "INSERT INTO review_outcomes (job_id, channel_id, content_hash, decision, lane, "
+        "low_risk, tier, decided_by) VALUES (gen_random_uuid(), 'c', 'h', 'approved', "
+        "'standard', true, 1, 'x')",
+        "UPDATE video_jobs SET approval_deadline = now() + interval '30 days'",
+    ],
+)
+def test_ops_has_no_write_access_to_uploads_review_evidence_or_deadlines(
+    database: str, forbidden: str
+) -> None:
+    with pytest.raises(psycopg.errors.InsufficientPrivilege):
+        run_as(database, "yt_ops", forbidden)
+
+
+@pytest.mark.parametrize("role", ["yt_gateway", "yt_ops"])
+def test_gateway_and_ops_cannot_rewrite_the_approval_deadline_or_manifest(
+    database: str, role: str
+) -> None:
+    for column in ("approval_deadline = now()", "manifest = '{}'::jsonb", "content_hash = NULL"):
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            run_as(database, role, f"UPDATE video_jobs SET {column}")  # noqa: S608
+
+
+@pytest.mark.parametrize("role", ["yt_worker", "yt_gateway", "yt_ops"])
+def test_nobody_but_triggers_can_write_audit_records_by_hand(database: str, role: str) -> None:
+    with pytest.raises(psycopg.errors.InsufficientPrivilege):
+        run_as(database, role, "SELECT audit('approval.consumed', 'job:x', '{}'::jsonb)")
+
+
+def test_a_claimed_hub_actor_from_another_login_is_recorded_as_untrusted(
+    database: str, sql: SQL
+) -> None:
+    login = "roles_test_worker_login"
+    sql(f'DROP ROLE IF EXISTS "{login}"')
+    sql(f'CREATE ROLE "{login}" NOLOGIN IN ROLE yt_worker')
+    try:
+        with psycopg.connect(database, autocommit=True) as conn:
+            conn.execute(f'SET SESSION AUTHORIZATION "{login}"')
+            conn.execute("SELECT set_config('app.actor', 'hub:alice', false)")
+            assert conn.execute("SELECT app_actor()").fetchone() == ("untrusted:hub:alice",)
+            conn.execute("RESET SESSION AUTHORIZATION")
+            conn.execute("SELECT set_config('app.actor', 'hub:alice', false)")
+            assert conn.execute("SELECT app_actor()").fetchone() == ("hub:alice",)  # superuser
+    finally:
+        sql(f'DROP OWNED BY "{login}"')
+        sql(f'DROP ROLE IF EXISTS "{login}"')
+
+
+def test_the_backup_role_reads_everything_and_writes_nothing(database: str) -> None:
+    assert run_as(database, "yt_backup", "SELECT count(*) FROM webauthn_credentials") is not None
+    for stmt in (
+        "INSERT INTO alerts (kind, message) VALUES ('x.y', 'z')",
+        "UPDATE channels SET status = 'paused'",
+        "DELETE FROM hub_sessions",
+    ):
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            run_as(database, "yt_backup", stmt)

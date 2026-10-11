@@ -24,7 +24,8 @@ locals {
     "database-url-worker",
     "database-url-gateway",
     "database-url-ops",
-    "slack-webhook", # approval hub notifications
+    "database-url-backup", # read-only login for the nightly dump
+    "slack-webhook",       # approval hub notifications
   ]
 }
 

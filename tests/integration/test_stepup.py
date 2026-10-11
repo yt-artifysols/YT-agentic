@@ -159,3 +159,52 @@ async def test_an_expired_stepup_challenge_is_refused(
             headers={"x-csrf-token": csrf},
         )
     assert res.status_code == 428
+
+
+async def test_minting_users_and_approving_policy_knowledge_need_proof_too(
+    hub: Hub, channel: Callable[..., str], sql: SQL
+) -> None:
+    """A stolen admin/approver session must not be able to add itself a passkey user or approve
+    a (poisoned) policy draft without a fresh assertion."""
+    ch = channel()
+    sql(
+        "INSERT INTO knowledge_docs (channel_id, kind, version, content, content_sha256, "
+        "status, proposed_by) VALUES (%s, 'banned_claims', 1, 'no hype', %s, 'draft', 'agent')",
+        ch, "sha256:" + "c" * 64,
+    )  # fmt: skip
+    doc = sql("SELECT id::text FROM knowledge_docs WHERE channel_id = %s", ch)[0][0]
+    async with hub.client() as c:
+        csrf = await hub.register(c, "the-boss", "admin")
+        h = {"x-csrf-token": csrf}
+        mint = {"username": "backdoor-user", "display_name": "B", "role": "admin"}
+        assert (await c.post("/api/admin/invites", json=mint, headers=h)).status_code == 428
+        assert sql("SELECT count(*) FROM hub_users WHERE username = 'backdoor-user'")[0][0] == 0
+        proof = await hub.stepup(c, "the-boss", csrf, "invite", ["backdoor-user", "admin"])
+        ok = await c.post("/api/admin/invites", json={**mint, "stepup": proof}, headers=h)
+        assert ok.status_code == 200
+    async with hub.client() as c:
+        csrf = await hub.register(c, "kb-approver", "approver")
+        h = {"x-csrf-token": csrf}
+        body = {"content_sha256": "sha256:" + "c" * 64}
+        assert (
+            await c.post(f"/api/knowledge/drafts/{doc}/approve", json=body, headers=h)
+        ).status_code == 428
+        assert sql("SELECT status FROM knowledge_docs WHERE id = %s", doc) == [("draft",)]
+        proof = await hub.stepup(
+            c, "kb-approver", csrf, "knowledge", [doc, "approve", "sha256:" + "c" * 64]
+        )
+        done = await c.post(
+            f"/api/knowledge/drafts/{doc}/approve", json={**body, "stepup": proof}, headers=h
+        )
+        assert done.status_code in (200, 409), done.text  # 409: the hash of this fixture row
+
+
+def test_production_forbids_turning_step_up_off() -> None:
+    from ytcore.approvals.service.settings import HubSettings
+
+    with pytest.raises(ValueError, match="require_stepup"):
+        HubSettings(
+            env="production", origin="https://hub.example.test", rp_id="example.test",
+            cookie_secure=True, key_backend="kms", signaler_backend="temporal",
+            notifier_backend="slack", require_stepup=False,
+        )  # fmt: skip

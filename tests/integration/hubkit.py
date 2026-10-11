@@ -13,6 +13,7 @@ import psycopg
 from tests.harness import Keys, drive_to_awaiting
 from tests.softauthn import SoftAuthenticator
 from ytcore.approvals.service.app import HubDeps, create_app
+from ytcore.approvals.service.console import ConsoleRepository
 from ytcore.approvals.service.hub import ApprovalHub
 from ytcore.approvals.service.notify import FakeNotifier
 from ytcore.approvals.service.repo import HubRepository, User
@@ -160,6 +161,7 @@ def build_hub(
             limiter=RateLimiter(),
             inputs=PostgresInputs.from_conninfo(conninfo),
             rollout=RolloutService(lambda: psycopg.connect(conninfo, autocommit=True)),
+            console=ConsoleRepository(lambda: psycopg.connect(conninfo, autocommit=True)),
             knowledge=PostgresKnowledge.from_conninfo(conninfo),
         )
     )

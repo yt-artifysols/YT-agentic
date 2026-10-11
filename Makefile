@@ -20,6 +20,7 @@ setup:
 # Re-resolve and re-hash every dependency (review the diff, then commit requirements.lock).
 lock:
 	uv pip compile pyproject.toml --extra dev --extra hub --extra youtube --extra agents --extra gcp --extra gateway --extra otel --generate-hashes --python-version 3.12 -o requirements.lock
+	uv pip compile pyproject.toml --extra hub --extra youtube --extra agents --extra gcp --extra gateway --extra otel --generate-hashes --python-version 3.12 -o requirements-runtime.lock
 
 lint:
 	$(PY) -m ruff check .

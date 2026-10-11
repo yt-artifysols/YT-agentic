@@ -74,7 +74,7 @@ def test_calls_without_the_service_identity_are_refused(
     job, token = rig.scheduled(channel())
     body = {"job_id": job, "token": token}
     assert rig.http.post("/v1/publish", json=body).status_code == 401
-    bad = {"Authorization": "Bearer not-the-token-not-the-token"}
+    bad = {"Authorization": "Bearer " + "z" * 24}
     assert rig.http.post("/v1/publish", json=body, headers=bad).status_code == 401
     wrong = RemoteGateway("http://gateway.test", lambda: "x" * 20, client=rig.http)
     with pytest.raises(PublishRefused):

@@ -604,6 +604,16 @@
             "title": "Role",
             "type": "string"
           },
+          "stepup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StepUpProof"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "username": {
             "pattern": "^[a-z0-9][a-z0-9._@-]{2,63}$",
             "title": "Username",
@@ -692,6 +702,16 @@
             "pattern": "^sha256:[0-9a-f]{64}$",
             "title": "Content Sha256",
             "type": "string"
+          },
+          "stepup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StepUpProof"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -981,6 +1001,16 @@
             "minLength": 3,
             "title": "Reason",
             "type": "string"
+          },
+          "stepup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StepUpProof"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -1671,6 +1701,16 @@
             "minLength": 20,
             "title": "Note",
             "type": "string"
+          },
+          "stepup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StepUpProof"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -1709,7 +1749,11 @@
               "batch",
               "release",
               "tier_confirm",
-              "rollout_enable"
+              "tier_dismiss",
+              "rollout_enable",
+              "rollout_signoff",
+              "invite",
+              "knowledge"
             ],
             "title": "Purpose",
             "type": "string"
@@ -2103,6 +2147,33 @@
         ]
       }
     },
+    "/api/admin/users": {
+      "get": {
+        "operationId": "admin_users_api_admin_users_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Admin Users Api Admin Users Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Admin Users",
+        "tags": [
+          "approvals",
+          "admin"
+        ]
+      }
+    },
     "/api/alerts": {
       "get": {
         "description": "Budget caps, circuit-breaker trips and other operator alerts.",
@@ -2417,6 +2488,78 @@
         "summary": "Stepup Options",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/api/channels": {
+      "get": {
+        "operationId": "channel_list_api_channels_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Channel List Api Channels Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Channel List",
+        "tags": [
+          "approvals",
+          "console"
+        ]
+      }
+    },
+    "/api/channels/{channel_id}": {
+      "get": {
+        "operationId": "channel_detail_api_channels__channel_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "title": "Channel Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Channel Detail Api Channels  Channel Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Channel Detail",
+        "tags": [
+          "approvals",
+          "console"
         ]
       }
     },
@@ -3291,6 +3434,54 @@
         ]
       }
     },
+    "/api/jobs/{job_id}/timeline": {
+      "get": {
+        "operationId": "job_timeline_api_jobs__job_id__timeline_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Job Timeline Api Jobs  Job Id  Timeline Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Job Timeline",
+        "tags": [
+          "approvals",
+          "console"
+        ]
+      }
+    },
     "/api/knowledge/drafts": {
       "get": {
         "operationId": "knowledge_drafts_api_knowledge_drafts_get",
@@ -3487,6 +3678,138 @@
         "summary": "Knowledge Reject",
         "tags": [
           "knowledge"
+        ]
+      }
+    },
+    "/api/overview": {
+      "get": {
+        "description": "Today at a glance: approvals waiting, production, alerts, switches, cost, activity.",
+        "operationId": "overview_api_overview_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Overview Api Overview Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Overview",
+        "tags": [
+          "approvals",
+          "console"
+        ]
+      }
+    },
+    "/api/pipeline": {
+      "get": {
+        "operationId": "pipeline_api_pipeline_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Channel"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cluster",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cluster"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Pipeline Api Pipeline Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pipeline",
+        "tags": [
+          "approvals",
+          "console"
         ]
       }
     },

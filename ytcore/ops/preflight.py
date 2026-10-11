@@ -77,14 +77,16 @@ def _roles(conn: psycopg.Connection[Any]) -> list[Check]:
         conn,
         "SELECT g.rolname, m.rolname, m.rolsuper FROM pg_roles g "
         "JOIN pg_auth_members a ON a.roleid = g.oid JOIN pg_roles m ON m.oid = a.member "
-        "WHERE g.rolname IN ('yt_hub', 'yt_worker', 'yt_gateway', 'yt_ops')",
+        "WHERE g.rolname IN ('yt_hub', 'yt_worker', 'yt_gateway', 'yt_ops', 'yt_backup')",
     )
     by_login: dict[str, set[str]] = {}
     for role, login, _ in rows:
         by_login.setdefault(login, set()).add(role)
     problems = [f"{login} is in {sorted(r)}" for login, r in by_login.items() if len(r) > 1]
     problems += [f"{login} is a superuser" for _, login, sup in rows if sup]
-    missing = sorted({"yt_hub", "yt_worker", "yt_gateway", "yt_ops"} - {r[0] for r in rows})
+    missing = sorted(
+        {"yt_hub", "yt_worker", "yt_gateway", "yt_ops", "yt_backup"} - {r[0] for r in rows}
+    )
     if problems:
         return [Check("fail", "one database role per service", "; ".join(problems))]
     if missing:

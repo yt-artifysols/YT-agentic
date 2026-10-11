@@ -28,8 +28,16 @@ from webauthn.helpers.structs import (
     UserVerificationRequirement,
 )
 
+from ytcore.approvals.service.console import ConsoleRepository
 from ytcore.approvals.service.hub import ApprovalHub, HubError
-from ytcore.approvals.service.repo import Credential, HubConflict, HubRepository, User, sha256
+from ytcore.approvals.service.repo import (
+    Credential,
+    HubConflict,
+    HubRepository,
+    User,
+    _is_uuid,
+    sha256,
+)
 from ytcore.approvals.service.security import (
     CEREMONY_COOKIE,
     AuthContext,
@@ -174,7 +182,10 @@ class StepUpProof(BaseModel):
 
 
 class StepUpIn(BaseModel):
-    purpose: Literal["approve", "batch", "release", "tier_confirm", "rollout_enable"]
+    purpose: Literal[
+        "approve", "batch", "release", "tier_confirm", "tier_dismiss", "rollout_enable",
+        "rollout_signoff", "invite", "knowledge",
+    ]  # fmt: skip
     parts: Annotated[list[Annotated[str, Field(max_length=200)]], Field(max_length=100)]
 
 
@@ -317,6 +328,7 @@ class GateOut(BaseModel):
 
 class SignoffIn(BaseModel):
     note: str = Field(min_length=20, max_length=2000)
+    stepup: StepUpProof | None = None
 
 
 class SignoffOut(BaseModel):
@@ -333,6 +345,7 @@ class InviteIn(BaseModel):
     username: str = Field(pattern=r"^[a-z0-9][a-z0-9._@-]{2,63}$")
     display_name: str = Field(min_length=1, max_length=100)
     role: Literal["approver", "operator", "admin"]
+    stepup: StepUpProof | None = None
 
 
 class InviteOut(BaseModel):
@@ -386,6 +399,7 @@ class KnowledgeProposeIn(BaseModel):
 
 class KnowledgeDecisionIn(BaseModel):
     content_sha256: Sha256
+    stepup: StepUpProof | None = None
 
 
 class KnowledgeRejectIn(KnowledgeDecisionIn):
@@ -457,6 +471,7 @@ class HubDeps:
     limiter: RateLimiter
     inputs: InputStore | None = None
     rollout: RolloutService | None = None
+    console: ConsoleRepository | None = None
     knowledge: Any = None  # channel-bound knowledge repositories (proposals only)
 
 
@@ -834,6 +849,7 @@ def create_app(deps: HubDeps) -> FastAPI:
     )  # fmt: skip
     async def rollout_signoff(cluster: str, body: SignoffIn, ctx: Session) -> SignoffOut:
         admin = require_role(ctx, "admin")
+        await require_stepup(ctx, body.stepup, "rollout_signoff", [cluster])
         try:
             sid = await asyncio.to_thread(
                 rollout_service().sign_off, cluster, admin.username, body.note
@@ -855,6 +871,76 @@ def create_app(deps: HubDeps) -> FastAPI:
         except RolloutRefused as exc:
             raise HTTPException(409, str(exc)) from None
         return Ok()
+
+    def console_repo() -> ConsoleRepository:
+        if deps.console is None:
+            raise HTTPException(503, "the console is not configured")
+        return deps.console
+
+    @api.get(
+        "/overview", tags=["console"], response_model=dict[str, Any], dependencies=[read_limit]
+    )
+    async def overview(ctx: Session) -> dict[str, Any]:
+        """Today at a glance: approvals waiting, production, alerts, switches, cost, activity."""
+        return await asyncio.to_thread(console_repo().overview)
+
+    @api.get(
+        "/pipeline", tags=["console"], response_model=dict[str, Any], dependencies=[read_limit]
+    )
+    async def pipeline(
+        ctx: Session,
+        state: str | None = None,
+        channel: str | None = None,
+        cluster: str | None = None,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> dict[str, Any]:
+        try:
+            return await asyncio.to_thread(
+                console_repo().pipeline,
+                state=state, channel=channel, cluster=cluster, limit=limit, offset=offset,
+            )  # fmt: skip
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
+
+    @api.get(
+        "/jobs/{job_id}/timeline", tags=["console"], response_model=list[dict[str, Any]],
+        dependencies=[read_limit],
+    )  # fmt: skip
+    async def job_timeline(job_id: str, ctx: Session) -> list[dict[str, Any]]:
+        rows = (
+            await asyncio.to_thread(console_repo().timeline, job_id) if _is_uuid(job_id) else None
+        )
+        if rows is None:
+            raise HTTPException(404, "job not found")
+        return rows
+
+    @api.get(
+        "/channels",
+        tags=["console"],
+        response_model=list[dict[str, Any]],
+        dependencies=[read_limit],
+    )
+    async def channel_list(ctx: Session) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(console_repo().channels)
+
+    @api.get(
+        "/channels/{channel_id}", tags=["console"], response_model=dict[str, Any],
+        dependencies=[read_limit],
+    )  # fmt: skip
+    async def channel_detail(channel_id: str, ctx: Session) -> dict[str, Any]:
+        row = await asyncio.to_thread(console_repo().channel, channel_id)
+        if row is None:
+            raise HTTPException(404, "channel not found")
+        return row
+
+    @api.get(
+        "/admin/users", tags=["admin"], response_model=list[dict[str, Any]],
+        dependencies=[read_limit],
+    )  # fmt: skip
+    async def admin_users(ctx: Session) -> list[dict[str, Any]]:
+        require_role(ctx, "admin")
+        return await asyncio.to_thread(console_repo().users)
 
     @api.get("/tiers", tags=["tiers"], response_model=list[TierRowOut], dependencies=[read_limit])
     async def tiers(ctx: Session) -> list[TierRowOut]:
@@ -900,6 +986,7 @@ def create_app(deps: HubDeps) -> FastAPI:
     )  # fmt: skip
     async def tier_dismiss(rid: int, body: TierDecisionIn, ctx: Session) -> Ok:
         admin = require_role(ctx, "admin")
+        await require_stepup(ctx, body.stepup, "tier_dismiss", [str(rid)])
         try:
             await asyncio.to_thread(deps.repo.tiers.dismiss, rid, admin.username, body.note)
         except LookupError as exc:
@@ -1074,6 +1161,8 @@ def create_app(deps: HubDeps) -> FastAPI:
               dependencies=[write_limit])  # fmt: skip
     async def invite(body: InviteIn, ctx: Session) -> InviteOut:
         admin = require_role(ctx, "admin")
+        # Minting a user is minting an approver: it needs the same fresh passkey proof.
+        await require_stepup(ctx, body.stepup, "invite", [body.username, body.role])
         user = await asyncio.to_thread(
             deps.repo.create_user, body.username, body.display_name, body.role,
             actor=f"hub:{admin.username}",
@@ -1142,6 +1231,9 @@ def create_app(deps: HubDeps) -> FastAPI:
         doc_id: str, body: KnowledgeDecisionIn, ctx: Session
     ) -> KnowledgeDocOut:
         user = require_role(ctx, "approver")
+        await require_stepup(
+            ctx, body.stepup, "knowledge", [doc_id, "approve", body.content_sha256]
+        )
         try:
             doc = await asyncio.to_thread(
                 deps.repo.decide_knowledge, doc_id, body.content_sha256,
@@ -1157,6 +1249,7 @@ def create_app(deps: HubDeps) -> FastAPI:
         doc_id: str, body: KnowledgeRejectIn, ctx: Session
     ) -> KnowledgeDocOut:
         user = require_role(ctx, "approver")
+        await require_stepup(ctx, body.stepup, "knowledge", [doc_id, "reject", body.content_sha256])
         try:
             doc = await asyncio.to_thread(
                 deps.repo.decide_knowledge, doc_id, body.content_sha256,

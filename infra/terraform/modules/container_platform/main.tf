@@ -35,7 +35,7 @@ variable "render_workers" {
 
 # One service account per component: least privilege and separate trust boundaries.
 resource "google_service_account" "svc" {
-  for_each     = toset(["approval-hub", "gateway", "worker", "ops", "scheduler"])
+  for_each     = toset(["approval-hub", "gateway", "worker", "ops", "scheduler", "backup"])
   project      = var.project_id
   account_id   = "${each.value}-${var.env}"
   display_name = "${each.value} (${var.env})"
@@ -119,12 +119,14 @@ locals {
     "worker"       = "database-url-worker"
     "gateway"      = "database-url-gateway"
     "ops"          = "database-url-ops"
+    "backup"       = "database-url-backup"
   }
   component = {
     "approval-hub" = "hub"
     "worker"       = "worker"
     "gateway"      = "gateway"
     "ops"          = "ops"
+    "backup"       = "ops"
   }
   service_env = {
     for sa, secret in local.db_secret : sa => merge(local.common_env, {
@@ -204,7 +206,7 @@ resource "google_storage_bucket_iam_member" "backups_ops" {
   for_each = toset(["roles/storage.objectCreator", "roles/storage.objectViewer"])
   bucket   = var.backups_bucket
   role     = each.value
-  member   = "serviceAccount:${google_service_account.svc["ops"].email}"
+  member   = "serviceAccount:${google_service_account.svc["backup"].email}"
 }
 
 resource "google_cloud_run_v2_service" "svc" {
@@ -304,7 +306,7 @@ resource "google_cloud_run_v2_job" "ops" {
 
   template {
     template {
-      service_account = google_service_account.svc["ops"].email
+      service_account = google_service_account.svc[each.key == "backup" ? "backup" : "ops"].email
       timeout         = each.value.timeout
       max_retries     = 1
       vpc_access {
@@ -317,7 +319,7 @@ resource "google_cloud_run_v2_job" "ops" {
         image   = var.images["worker"]
         command = each.value.command
         dynamic "env" {
-          for_each = local.service_env["ops"]
+          for_each = local.service_env[each.key == "backup" ? "backup" : "ops"]
           content {
             name  = env.key
             value = env.value

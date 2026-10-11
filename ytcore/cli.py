@@ -39,7 +39,7 @@ from ytcore.knowledge.store import PostgresKnowledge
 from ytcore.safety.scrub import install_log_scrubber
 from ytcore.store.errors import StoreError
 
-SERVICE_ROLES = ("yt_hub", "yt_worker", "yt_gateway", "yt_ops")
+SERVICE_ROLES = ("yt_hub", "yt_worker", "yt_gateway", "yt_ops", "yt_backup")
 
 
 def _conninfo() -> str:

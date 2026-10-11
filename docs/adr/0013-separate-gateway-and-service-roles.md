@@ -32,6 +32,20 @@ channel tokens or forged the human decisions.
   worker, gateway or ops connection cannot approve, sign off, release a switch, promote a tier
   or read sessions, even after setting `app.actor = 'hub:alice'`.
 
+## Hardening from the Phase 8 re-review
+- The ops role may only set a cluster or channel to `paused`; a trigger refuses any resume
+  unless the caller is the hub. Ops has no write access to uploads, review outcomes (the
+  evidence tiers are judged on), the approval deadline or manifests: column-level grants on
+  `video_jobs` per role. Reconciling an upload by hand (`ytctl ops adopt-upload`) needs an admin
+  login, not the scheduled ops identity.
+- `audit()` is callable only by the hub; every trigger that audits is SECURITY DEFINER, and a
+  claimed `hub:<name>` actor is recorded as `untrusted:` unless the login is the hub's.
+- A fifth role, `yt_backup` (read-only), runs the nightly dump under its own service account.
+- Step-up now also covers invites (minting users), knowledge approval, rollout sign-off and tier
+  dismissal; production refuses `require_stepup=false`.
+- The production image installs only from the hash-locked `requirements-runtime.lock` and the
+  base image has no default (build with a digest).
+
 ## Consequences
 - Production needs four database logins and the role grants (go-live runbook section 0).
 - The ops role can pause clusters and channels but not resume them or change anything else.

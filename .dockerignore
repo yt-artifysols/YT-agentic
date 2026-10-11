@@ -10,3 +10,4 @@ ui
 infra
 **/__pycache__
 **/node_modules
+requirements.lock
