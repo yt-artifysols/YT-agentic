@@ -15,6 +15,19 @@
 - **Go-live runbook** with a game day: the system goes live with the global kill switch engaged,
   one channel, one video, and the stop conditions written down.
 
+## Final security review (whole repo) and what changed
+Fixed: Cloud KMS signing provider (`KmsKeyProvider` + injectable client; Terraform key,
+signer-only IAM for the hub, no private-key secret container, hub env incl. `YT_HUB_*`); hub
+rate limiter (unauthenticated endpoints limited per client address, never per attacker-chosen
+cookie; bounded memory; rightmost forwarded address); production hub refuses an in-memory asset
+store and the Cloud Run hub gets the bucket source; approve needs an explicit "I reviewed this
+version" confirmation and the one-key shortcut is gone; `preflight` resolves secrets only with
+`--check-secrets`.
+
+**Open blockers for real go-live** (see docs/runbooks/go-live.md section 0): gateway as its own
+service, per-service database roles, supply-chain pinning, SSRF IP pinning, per-channel storage
+IAM, render-worker sandbox. A step-up passkey assertion per approval is also recommended.
+
 ## Not done / accepted
 - Strikes are still entered by a person; YouTube offers no API for them.
 - Sign-off timestamps and `live_since` can be backdated only with direct database privileges;

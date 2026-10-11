@@ -3,6 +3,25 @@
 Nothing publishes without your approval, and every step below is reversible with the kill
 switch ([kill-switch.md](kill-switch.md)). Do the steps in order; stop at the first failure.
 
+## 0. Blocking prerequisites (found by the Phase 7 security review; NOT built yet)
+Do not go live with real credentials until each of these is closed (ADR 0012):
+- [ ] **Separate gateway service.** Today `PublishService` runs inside the worker process, which
+      also handles untrusted content. The channel OAuth tokens are readable only by the gateway
+      service account, so a real publish fails closed until the gateway is its own Cloud Run
+      service (takes `{job_id, token}` only; only the worker may invoke it). Do NOT "fix" this by
+      granting the worker the channel tokens.
+- [ ] **Per-service database roles.** All services share one database credential and `app.actor`
+      is self-asserted, so a compromised worker could forge human-only actions (approve
+      knowledge, sign off a cluster, release kill switches). Needs per-service roles, REVOKEs and
+      hub-only SECURITY DEFINER functions. Until then the Ed25519 check in the gateway is the
+      only thing between a compromised worker and an upload.
+- [ ] Supply chain: lockfile with hashes, actions and hooks pinned by SHA, image digests.
+- [ ] SSRF: pin the resolved IP in the web fetcher (DNS rebinding); total download deadline.
+- [ ] Storage: per-channel IAM conditions or no delete for the worker.
+- [ ] Render workers sandboxed with restricted egress before real media providers are enabled.
+Closed in Phase 7: Cloud KMS signing provider and Terraform, hub production settings and asset
+source, auth rate limiter, explicit "I reviewed this version" step before approve.
+
 ## 1. Before anything is real (once)
 - [ ] Production Terraform applied (`make tf-validate`, then plan/apply by a person); signing key
       is KMS-backed and readable by the hub's service account only; the gateway gets the PUBLIC
