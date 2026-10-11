@@ -42,6 +42,7 @@ def test_commands_named_in_runbooks_exist() -> None:
         "preflight": [],
         "grant-role": ["--role", "yt_ops", "--login", "x"],
         "plans": [],
+        "seed-staging": [],
         "adopt-upload": ["--upload", "u", "--video-id", "v"],
         "release-upload": ["--upload", "u", "--reason", "r"],
     }

@@ -63,6 +63,9 @@ render and QA; a HUMAN approval is mandatory before anything is published.
   (`docs/runbooks/go-live.md`)
 - Database roles (migration 014): `yt_hub`, `yt_worker`, `yt_gateway`, `yt_ops`, one login each;
   only the hub can approve/sign off/release switches (tests run services with `-c role=...`)
+- `ytcore/serverless` + `deploy/vercel` – STAGING on Vercel (ADR 0014, `docs/runbooks/vercel-staging.md`):
+  DB-backed ceremonies/decisions/assets (migration 015), `JobDriver` (cron) instead of Temporal;
+  refuses `ENV=production`; no real publishing
 - `docs/runbooks` – kill switch, key rotation, stuck jobs, quota, strikes, suspension, restore
 - `tests/redteam` – adversarial suite (`make redteam`); must stay green
 - `ytctl` (`ytcore/cli.py`) – owner inputs and knowledge proposals

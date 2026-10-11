@@ -2,6 +2,7 @@
 
 KeyProvider hides where the Ed25519 private key lives:
 - LocalFileKeyProvider: a PEM file on disk, dev only (refuses ENV=production).
+- EnvKeyProvider: staging on serverless hosts; PEM from a platform secret (refuses production).
 - KmsKeyProvider: interface for a cloud KMS asymmetric key (sign happens inside the KMS, the
   private key never leaves it); the client is injectable for tests.
 
@@ -67,6 +68,29 @@ class LocalFileKeyProvider:
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "wb") as fh:
             fh.write(pem)
+
+    def sign(self, data: bytes) -> bytes:
+        return self._key.sign(data)
+
+    def public_key(self) -> Ed25519PublicKey:
+        return self._key.public_key()
+
+
+class EnvKeyProvider:
+    """STAGING ONLY (serverless hosts with no KMS): the private PEM comes from an encrypted
+    platform secret held by the hub's project alone. Refuses ENV=production."""
+
+    def __init__(self, var: str = "YT_HUB_SIGNING_KEY_PEM", *, env: str | None = None) -> None:
+        for candidate in (env, os.environ.get("ENV")):
+            if candidate is not None and candidate.strip().lower() == "production":
+                raise ProductionForbiddenError("EnvKeyProvider refuses ENV=production; use KMS")
+        pem = os.environ.get(var, "").replace("\\n", "\n").encode()
+        if not pem:
+            raise ValueError(f"{var} is not set")
+        key = serialization.load_pem_private_key(pem, password=None)
+        if not isinstance(key, Ed25519PrivateKey):
+            raise ValueError("approval key must be Ed25519")
+        self._key = key
 
     def sign(self, data: bytes) -> bytes:
         return self._key.sign(data)

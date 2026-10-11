@@ -41,6 +41,7 @@ from ytcore.approvals.service.repo import (
 from ytcore.approvals.service.security import (
     CEREMONY_COOKIE,
     AuthContext,
+    Ceremonies,
     Ceremony,
     CeremonyStore,
     RateLimiter,
@@ -467,7 +468,7 @@ class HubDeps:
     hub: ApprovalHub
     assets: AssetSource
     sessions: SessionManager
-    ceremonies: CeremonyStore
+    ceremonies: Ceremonies
     limiter: RateLimiter
     inputs: InputStore | None = None
     rollout: RolloutService | None = None

@@ -13,7 +13,12 @@ from typing import Any
 import psycopg
 from fastapi import FastAPI
 
-from ytcore.approvals.keys import KeyProvider, KmsKeyProvider, LocalFileKeyProvider
+from ytcore.approvals.keys import (
+    EnvKeyProvider,
+    KeyProvider,
+    KmsKeyProvider,
+    LocalFileKeyProvider,
+)
 from ytcore.approvals.service.app import HubDeps, create_app
 from ytcore.approvals.service.console import ConsoleRepository
 from ytcore.approvals.service.hub import ApprovalHub
@@ -28,6 +33,8 @@ from ytcore.gateway.assets import AssetSource, InMemoryAssetSource
 from ytcore.inputs.store import PostgresInputs
 from ytcore.knowledge.store import PostgresKnowledge
 from ytcore.safety.scrub import install_log_scrubber
+from ytcore.serverless.ceremonies import DbCeremonyStore
+from ytcore.serverless.signaler import DbSignaler
 from ytcore.store.postgres import PostgresStore
 from ytcore.workflow.models import HubDecision
 
@@ -48,6 +55,8 @@ class LazyTemporalSignaler:
 def build_key_provider(settings: HubSettings) -> KeyProvider:
     if settings.key_backend == "kms":
         return KmsKeyProvider(key_resource=settings.kms_key_resource)
+    if settings.key_backend == "env":
+        return EnvKeyProvider(env=settings.env)
     return LocalFileKeyProvider(settings.key_file, env=settings.env)
 
 
@@ -67,11 +76,12 @@ def create_hub_app(
     # The store only ever gets the PUBLIC key; the private key stays inside the signer.
     store = PostgresStore.from_conninfo(conninfo, ApprovalVerifier(keys.public_key()))
     if signaler is None:
-        signaler = (
-            LazyTemporalSignaler(settings.temporal_address, settings.temporal_namespace)
-            if settings.signaler_backend == "temporal"
-            else FakeSignaler()
-        )
+        if settings.signaler_backend == "db":
+            signaler = DbSignaler(conninfo)
+        elif settings.signaler_backend == "temporal":
+            signaler = LazyTemporalSignaler(settings.temporal_address, settings.temporal_namespace)
+        else:
+            signaler = FakeSignaler()
     if notifier is None:
         if secrets is None:
             from ytcore.config import build_secrets_provider, load_settings
@@ -92,9 +102,11 @@ def create_hub_app(
         settings=settings,
         repo=repo,
         hub=hub,
-        assets=resolve_assets(settings, assets),
+        assets=resolve_assets(settings, assets, conninfo),
         sessions=SessionManager(repo, settings),
-        ceremonies=CeremonyStore(),
+        ceremonies=DbCeremonyStore(conninfo)
+        if settings.ceremony_backend == "db"
+        else CeremonyStore(),
         limiter=RateLimiter(),
         inputs=PostgresInputs.from_conninfo(conninfo),
         rollout=RolloutService(lambda: psycopg.connect(conninfo, autocommit=True)),
@@ -104,11 +116,19 @@ def create_hub_app(
     return create_app(deps)
 
 
-def resolve_assets(settings: HubSettings, assets: AssetSource | None) -> AssetSource:
+def resolve_assets(
+    settings: HubSettings, assets: AssetSource | None, conninfo: str = ""
+) -> AssetSource:
     """The reviewer must see the real video: production never falls back to an empty in-memory
     store (the preview would be blind and approval would rest on text alone)."""
     if assets is not None:
         return assets
+    if settings.asset_backend == "db":
+        if settings.env == "production":
+            raise RuntimeError("database-backed assets are for staging only")
+        from ytcore.serverless.assets import PostgresAssetSource
+
+        return PostgresAssetSource(conninfo)
     if settings.env == "production":
         raise RuntimeError("the production hub needs a real asset source (storage bucket)")
     return InMemoryAssetSource()

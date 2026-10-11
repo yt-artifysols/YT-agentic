@@ -52,3 +52,6 @@ pgdata/
 
 ui/hub/out/
 site/hub-demo/
+
+deploy/vercel/*/ytcore/
+deploy/vercel/*/config/

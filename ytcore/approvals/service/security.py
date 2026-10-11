@@ -16,6 +16,7 @@ import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Protocol
 
 from fastapi import HTTPException, Request, Response
 
@@ -71,6 +72,12 @@ class Ceremony:
     user_id: str | None = None
     invite_token: str | None = None
     subject: str | None = None  # step-up: the exact action this challenge authorises
+
+
+class Ceremonies(Protocol):
+    def put(self, ceremony: Ceremony) -> str: ...
+
+    def pop(self, key: str | None, kind: str) -> Ceremony: ...
 
 
 class CeremonyStore:
