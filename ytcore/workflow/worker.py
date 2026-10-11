@@ -27,7 +27,7 @@ from temporalio.worker import Worker
 from ytcore.agents.factory import build_postgres_pipeline, build_providers
 from ytcore.agents.pipeline import Providers
 from ytcore.approvals.token import ApprovalVerifier
-from ytcore.config import Settings, build_secrets_provider, load_settings
+from ytcore.config import Environment, Settings, build_secrets_provider, load_settings
 from ytcore.gateway import build_youtube_client
 from ytcore.gateway.assets import (
     GcsAssetSource,
@@ -36,6 +36,7 @@ from ytcore.gateway.assets import (
     LocalDirAssetSource,
 )
 from ytcore.gateway.clients import YouTubeClient
+from ytcore.gateway.remote import RemoteGateway, google_id_token_provider
 from ytcore.gateway.service import PublishService
 from ytcore.planner.daily import DailyPlanner, PlanRepository
 from ytcore.planner.temporal import TemporalStarter
@@ -44,7 +45,7 @@ from ytcore.scheduling.cluster import PostgresClusterState
 from ytcore.scheduling.pools import PoolLimiter
 from ytcore.secrets.provider import SecretRef, SecretsProvider
 from ytcore.store.postgres import PostgresStore
-from ytcore.workflow.activities import JobActivities
+from ytcore.workflow.activities import JobActivities, Publisher
 from ytcore.workflow.supervisor import ClusterActivities, ClusterSupervisorWorkflow
 from ytcore.workflow.video_job import VideoJobWorkflow
 
@@ -79,6 +80,17 @@ def load_verifier(settings: Settings, secrets: SecretsProvider) -> ApprovalVerif
     return ApprovalVerifier(key)
 
 
+def build_gateway(settings: Settings, secrets: SecretsProvider) -> Publisher | None:
+    """The remote gateway when one is configured (always, in production); else None."""
+    if not settings.gateway_url:
+        return None
+    if settings.gateway_static_token_ref:  # dev/test only; production validation refuses it
+        token = secrets.get(SecretRef(settings.gateway_static_token_ref)).reveal()
+        return RemoteGateway(settings.gateway_url, lambda: token, allow_insecure=True)
+    audience = settings.gateway_audience or settings.gateway_url
+    return RemoteGateway(settings.gateway_url, google_id_token_provider(audience))
+
+
 def build_stack(
     settings: Settings,
     secrets: SecretsProvider,
@@ -89,6 +101,7 @@ def build_stack(
     youtube: YouTubeClient | None = None,
     providers: Providers | None = None,
     pool_poll_seconds: float = 1.0,
+    gateway: Publisher | None = None,
 ) -> Stack:
     dsn = conninfo or secrets.get(SecretRef(settings.database_url_ref)).reveal()
     verifier = verifier or load_verifier(settings, secrets)
@@ -96,16 +109,22 @@ def build_stack(
     store = PostgresStore.from_conninfo(dsn, verifier)
     plans = PlanRepository.from_conninfo(dsn)
     pipeline = build_postgres_pipeline(dsn, assets, providers or build_providers(settings, secrets))
-    publisher = PublishService(
-        repo=store,
-        verifier=verifier,
-        client=youtube or build_youtube_client(settings.youtube_backend, settings.env.value),
-        assets=assets,
-        secrets=secrets,
-        env=settings.env.value,
-        upload_units=settings.youtube_upload_quota_units,
-        status_units=settings.youtube_status_quota_units,
-    )
+    publisher = gateway or build_gateway(settings, secrets)
+    separated = publisher is not None
+    if publisher is None:
+        if settings.env is Environment.PRODUCTION:  # pragma: no cover - blocked by validation
+            raise SystemExit("production workers publish only through the gateway service")
+        # Dev and tests: the same PublishService, in this process.
+        publisher = PublishService(
+            repo=store,
+            verifier=verifier,
+            client=youtube or build_youtube_client(settings.youtube_backend, settings.env.value),
+            assets=assets,
+            secrets=secrets,
+            env=settings.env.value,
+            upload_units=settings.youtube_upload_quota_units,
+            status_units=settings.youtube_status_quota_units,
+        )
 
     def connect() -> psycopg.Connection[Any]:
         return psycopg.connect(dsn, autocommit=True)
@@ -118,6 +137,7 @@ def build_stack(
         replanner=lambda job, reason: plans.request_replan(job, reason),
         limiter=PoolLimiter(connect),
         pool_poll_seconds=pool_poll_seconds,
+        hub_records_approvals=separated,
     )
     state = PostgresClusterState(connect)
     cluster = ClusterActivities(state.limits, state.report)
@@ -139,13 +159,16 @@ async def run_worker(settings: Settings, stack: Stack, client: Client | None = N
     await worker.run()
 
 
-async def plan_once(settings: Settings, stack: Stack, client: Client | None = None) -> Any:
+async def plan_once(
+    settings: Settings, stack: Stack | PlanRepository, client: Client | None = None
+) -> Any:
+    plans = stack.plans if isinstance(stack, Stack) else stack
     client = client or await connect(settings)
     loop = asyncio.get_running_loop()
     starter = TemporalStarter(
         client, loop, settings.temporal_task_queue, supervised=settings.cluster_supervisors
     )
-    planner = DailyPlanner(stack.plans, starter)
+    planner = DailyPlanner(plans, starter)
     return await asyncio.to_thread(planner.run)
 
 
@@ -156,11 +179,13 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI
     install_log_scrubber()
     settings = load_settings()
     secrets = build_secrets_provider(settings)
-    stack = build_stack(settings, secrets)
     if args.cmd == "run":
-        asyncio.run(run_worker(settings, stack))
+        asyncio.run(run_worker(settings, build_stack(settings, secrets)))
         return 0
-    run = asyncio.run(plan_once(settings, stack))
+    # The planner is an ops job: it needs only the plan tables and Temporal, never the
+    # production pipeline, assets or the gateway.
+    dsn = secrets.get(SecretRef(settings.database_url_ref)).reveal()
+    run = asyncio.run(plan_once(settings, PlanRepository.from_conninfo(dsn)))
     print(f"planned {len(run.planned)}, replanned {len(run.replanned)}, skipped {len(run.skipped)}")
     return 0
 

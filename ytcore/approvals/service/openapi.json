@@ -72,6 +72,16 @@
             "pattern": "^sha256:[0-9a-f]{64}$",
             "title": "Content Hash",
             "type": "string"
+          },
+          "stepup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StepUpProof"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -141,6 +151,16 @@
             "minItems": 1,
             "title": "Items",
             "type": "array"
+          },
+          "stepup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StepUpProof"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -455,6 +475,22 @@
         "title": "EditOut",
         "type": "object"
       },
+      "EnableIn": {
+        "properties": {
+          "stepup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StepUpProof"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "EnableIn",
+        "type": "object"
+      },
       "GateOut": {
         "properties": {
           "breaker_trips": {
@@ -632,6 +668,16 @@
             "maxLength": 500,
             "title": "Reason",
             "type": "string"
+          },
+          "stepup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StepUpProof"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -1646,6 +1692,77 @@
         "title": "SignoffOut",
         "type": "object"
       },
+      "StepUpIn": {
+        "properties": {
+          "parts": {
+            "items": {
+              "maxLength": 200,
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Parts",
+            "type": "array"
+          },
+          "purpose": {
+            "enum": [
+              "approve",
+              "batch",
+              "release",
+              "tier_confirm",
+              "rollout_enable"
+            ],
+            "title": "Purpose",
+            "type": "string"
+          }
+        },
+        "required": [
+          "purpose",
+          "parts"
+        ],
+        "title": "StepUpIn",
+        "type": "object"
+      },
+      "StepUpOut": {
+        "properties": {
+          "options": {
+            "additionalProperties": true,
+            "title": "Options",
+            "type": "object"
+          },
+          "ticket": {
+            "title": "Ticket",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket",
+          "options"
+        ],
+        "title": "StepUpOut",
+        "type": "object"
+      },
+      "StepUpProof": {
+        "description": "A fresh passkey assertion for exactly one action (see /auth/stepup/options).",
+        "properties": {
+          "credential": {
+            "additionalProperties": true,
+            "title": "Credential",
+            "type": "object"
+          },
+          "ticket": {
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Ticket",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket",
+          "credential"
+        ],
+        "title": "StepUpProof",
+        "type": "object"
+      },
       "StrikeIn": {
         "properties": {
           "kind": {
@@ -1774,6 +1891,16 @@
             "minLength": 10,
             "title": "Note",
             "type": "string"
+          },
+          "stepup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StepUpProof"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -2246,6 +2373,48 @@
           }
         },
         "summary": "Register Verify",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/stepup/options": {
+      "post": {
+        "description": "A challenge for ONE action; the passkey assertion that answers it is the proof.",
+        "operationId": "stepup_options_api_auth_stepup_options_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StepUpIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StepUpOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stepup Options",
         "tags": [
           "auth"
         ]
@@ -3335,6 +3504,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/EnableIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {

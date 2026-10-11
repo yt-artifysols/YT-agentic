@@ -31,6 +31,9 @@ class HubSettings(BaseSettings):
 
     # Approval policy.
     token_ttl_hours: int = Field(default=24, ge=1, le=72)
+    # A fresh passkey assertion for each approval, batch approval, kill-switch release and tier
+    # promotion (a stolen session cookie alone cannot approve).
+    require_stepup: bool = True
     fast_lane_max_risk: int = Field(default=20, ge=0, le=100)
     batch_max_items: int = Field(default=25, ge=1, le=100)
 

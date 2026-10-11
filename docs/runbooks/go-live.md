@@ -5,16 +5,14 @@ switch ([kill-switch.md](kill-switch.md)). Do the steps in order; stop at the fi
 
 ## 0. Blocking prerequisites (found by the Phase 7 security review; NOT built yet)
 Do not go live with real credentials until each of these is closed (ADR 0012):
-- [ ] **Separate gateway service.** Today `PublishService` runs inside the worker process, which
-      also handles untrusted content. The channel OAuth tokens are readable only by the gateway
-      service account, so a real publish fails closed until the gateway is its own Cloud Run
-      service (takes `{job_id, token}` only; only the worker may invoke it). Do NOT "fix" this by
-      granting the worker the channel tokens.
-- [ ] **Per-service database roles.** All services share one database credential and `app.actor`
-      is self-asserted, so a compromised worker could forge human-only actions (approve
-      knowledge, sign off a cluster, release kill switches). Needs per-service roles, REVOKEs and
-      hub-only SECURITY DEFINER functions. Until then the Ed25519 check in the gateway is the
-      only thing between a compromised worker and an upload.
+- [x] **Separate gateway service** (ADR 0013): `ytcore.gateway.main` is its own Cloud Run
+      service; only the worker's service account may invoke it; workers hold no YouTube
+      credentials. Verify with a game-day publish.
+- [x] **Per-service database roles** (migration 014). Setup per environment, as the database
+      admin: create four logins (Cloud SQL IAM users, one per service account), then
+      `ytctl ops grant-role --role yt_hub --login <hub login>` (and `yt_worker`, `yt_gateway`,
+      `yt_ops`). Store each login's connection string only in its own `database-url-<service>`
+      secret. `ytctl ops preflight` fails if one login holds two roles or is a superuser.
 - [ ] Supply chain: lockfile with hashes, actions and hooks pinned by SHA, image digests.
 - [ ] SSRF: pin the resolved IP in the web fetcher (DNS rebinding); total download deadline.
 - [ ] Storage: per-channel IAM conditions or no delete for the worker.

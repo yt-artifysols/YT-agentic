@@ -8,13 +8,18 @@ export PGPORT ?= 5432
 export PGUSER ?= ytcore
 export PGPASSWORD ?= ytcore-dev
 
-.PHONY: scale-sim setup lint format typecheck test test-db test-integration test-all check-generated check-migrations \
+.PHONY: lock scale-sim setup lint format typecheck test test-db test-integration test-all check-generated check-migrations \
         audit secrets-scan up down tf-validate site ui-check test-e2e hub evals redteam restore-drill check-observability
 
 setup:
 	uv venv .venv
-	uv pip install -p .venv -e '.[dev,hub,youtube,agents]'
+	uv pip install -p .venv --require-hashes -r requirements.lock
+	uv pip install -p .venv --no-deps -e .
 	$(PY) -m pre_commit install
+
+# Re-resolve and re-hash every dependency (review the diff, then commit requirements.lock).
+lock:
+	uv pip compile pyproject.toml --extra dev --extra hub --extra youtube --extra agents --extra gcp --extra gateway --extra otel --generate-hashes --python-version 3.12 -o requirements.lock
 
 lint:
 	$(PY) -m ruff check .

@@ -109,8 +109,40 @@ locals {
     YT_TEMPORAL_NAMESPACE      = var.temporal_namespace
     YT_STORAGE_BACKEND         = "object_store"
     YT_STORAGE_BUCKET          = var.assets_bucket
-    YT_DATABASE_URL_REF        = "vault://database-url"
+    YT_YOUTUBE_BACKEND         = "real" # only the gateway builds a client; others just validate
     YT_APPROVAL_PUBLIC_KEY_REF = "vault://approval-public-key"
+  }
+
+  # Each service connects with its own database login (its own role) and knows which one it is.
+  db_secret = {
+    "approval-hub" = "database-url-hub"
+    "worker"       = "database-url-worker"
+    "gateway"      = "database-url-gateway"
+    "ops"          = "database-url-ops"
+  }
+  component = {
+    "approval-hub" = "hub"
+    "worker"       = "worker"
+    "gateway"      = "gateway"
+    "ops"          = "ops"
+  }
+  service_env = {
+    for sa, secret in local.db_secret : sa => merge(local.common_env, {
+      YT_DATABASE_URL_REF = "vault://${secret}"
+      YT_COMPONENT        = local.component[sa]
+    })
+  }
+
+  # The gateway is its own service: the only holder of YouTube credentials. Only the worker's
+  # service account may call it (Cloud Run IAM) and its ID token is checked again in the app.
+  gateway_audience = "gateway-${var.env}"
+  gateway_env = {
+    YT_GATEWAY_AUDIENCE        = local.gateway_audience
+    YT_GATEWAY_ALLOWED_CALLERS = jsonencode([google_service_account.svc["worker"].email])
+  }
+  worker_env = {
+    YT_GATEWAY_URL      = google_cloud_run_v2_service.svc["gateway"].uri
+    YT_GATEWAY_AUDIENCE = local.gateway_audience
   }
 
   # Settings only the approval hub reads (the production validator refuses anything weaker).
@@ -129,10 +161,10 @@ locals {
   }
 }
 
-# Database URL: every component that talks to Postgres.
+# Database URL: each service reads ONLY its own login.
 resource "google_secret_manager_secret_iam_member" "database_url" {
-  for_each  = toset(["approval-hub", "gateway", "worker", "ops"])
-  secret_id = var.platform_secret_ids["database-url"]
+  for_each  = local.db_secret
+  secret_id = var.platform_secret_ids[each.value]
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.svc[each.key].email}"
 }
@@ -155,10 +187,12 @@ resource "google_secret_manager_secret_iam_member" "ops_analytics_tokens" {
 
 # Object storage: workers write renders, the gateway and hub only read; ops reads and writes
 # backups. Objects are content-addressed, so nothing is ever overwritten with different bytes.
+# Create and read only: the worker can neither delete nor overwrite an approved asset.
 resource "google_storage_bucket_iam_member" "assets_worker" {
-  bucket = var.assets_bucket
-  role   = "roles/storage.objectUser"
-  member = "serviceAccount:${google_service_account.svc["worker"].email}"
+  for_each = toset(["roles/storage.objectCreator", "roles/storage.objectViewer"])
+  bucket   = var.assets_bucket
+  role     = each.value
+  member   = "serviceAccount:${google_service_account.svc["worker"].email}"
 }
 resource "google_storage_bucket_iam_member" "assets_readers" {
   for_each = toset(["gateway", "approval-hub", "ops"])
@@ -174,15 +208,17 @@ resource "google_storage_bucket_iam_member" "backups_ops" {
 }
 
 resource "google_cloud_run_v2_service" "svc" {
+  # The worker is not a service: it is the pull-based worker pool below (no inbound traffic).
   for_each = {
-    "approval-hub" = var.images["approval_hub"]
-    "gateway"      = var.images["gateway"]
-    "worker"       = var.images["worker"]
+    "approval-hub" = { image = var.images["approval_hub"], module = "ytcore.approvals.service.main:app" }
+    "gateway"      = { image = var.images["gateway"], module = "ytcore.gateway.main:app" }
   }
   project  = var.project_id
   name     = "${each.key}-${var.env}"
   location = var.region
   ingress  = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  # The gateway's ID-token audience (callers fetch a token for exactly this audience).
+  custom_audiences = each.key == "gateway" ? [local.gateway_audience] : []
 
   template {
     service_account = google_service_account.svc[each.key].email
@@ -193,9 +229,14 @@ resource "google_cloud_run_v2_service" "svc" {
       }
     }
     containers {
-      image = each.value
+      image   = each.value.image
+      command = ["python", "-m", "uvicorn", each.value.module, "--host", "0.0.0.0", "--port", "8080"]
       dynamic "env" {
-        for_each = merge(local.common_env, each.key == "approval-hub" ? local.hub_env : {})
+        for_each = merge(
+          local.service_env[each.key],
+          each.key == "approval-hub" ? local.hub_env : {},
+          each.key == "gateway" ? local.gateway_env : {},
+        )
         content {
           name  = env.key
           value = env.value
@@ -233,7 +274,7 @@ resource "google_cloud_run_v2_worker_pool" "render" {
         }
       }
       dynamic "env" {
-        for_each = local.common_env
+        for_each = merge(local.service_env["worker"], local.worker_env)
         content {
           name  = env.key
           value = env.value
@@ -263,7 +304,7 @@ resource "google_cloud_run_v2_job" "ops" {
 
   template {
     template {
-      service_account = google_service_account.svc[each.key == "planner" ? "worker" : "ops"].email
+      service_account = google_service_account.svc["ops"].email
       timeout         = each.value.timeout
       max_retries     = 1
       vpc_access {
@@ -276,7 +317,7 @@ resource "google_cloud_run_v2_job" "ops" {
         image   = var.images["worker"]
         command = each.value.command
         dynamic "env" {
-          for_each = local.common_env
+          for_each = local.service_env["ops"]
           content {
             name  = env.key
             value = env.value
@@ -336,7 +377,7 @@ resource "google_cloud_run_v2_service" "exporter" {
       image   = var.images["worker"]
       command = ["python", "-m", "ytcore.observability.exporter", "--port", "8080"]
       dynamic "env" {
-        for_each = local.common_env
+        for_each = local.service_env["ops"]
         content {
           name  = env.key
           value = env.value
@@ -352,4 +393,13 @@ output "job_names" {
 
 output "service_accounts" {
   value = { for k, sa in google_service_account.svc : k => sa.email }
+}
+
+# Only the worker's service account may invoke the gateway (nobody else, and nothing public).
+resource "google_cloud_run_v2_service_iam_member" "worker_calls_gateway" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.svc["gateway"].name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.svc["worker"].email}"
 }

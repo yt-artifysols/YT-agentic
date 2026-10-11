@@ -18,7 +18,12 @@ locals {
     "approval-public-key", # gateway and verifiers
     "anthropic-api-key",
     "youtube-oauth-client",
-    "database-url",  # readable by every service that talks to Postgres
+    # One database login per service, each mapped to exactly one database role (yt_hub, yt_worker,
+    # yt_gateway, yt_ops; migration 014): a compromised worker cannot approve or publish.
+    "database-url-hub",
+    "database-url-worker",
+    "database-url-gateway",
+    "database-url-ops",
     "slack-webhook", # approval hub notifications
   ]
 }

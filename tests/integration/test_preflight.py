@@ -113,3 +113,23 @@ def test_a_pending_upload_blocks_go_live(
     checks = _by_name(preflight.run(_connect(db), secrets=InMemorySecretsProvider(values)))
     assert checks["no uploads left pending"].status == "fail"
     assert not preflight.go(list(checks.values()))
+
+
+def test_a_login_in_two_service_roles_or_a_superuser_blocks_go_live(db: str) -> None:
+    admin = psycopg.connect(db, autocommit=True)
+    login = "preflight_split_login"
+    try:
+        admin.execute(f'DROP ROLE IF EXISTS "{login}"')
+        admin.execute(f'CREATE ROLE "{login}" NOLOGIN')
+        admin.execute(f'GRANT yt_worker, yt_gateway TO "{login}"')
+        checks = _by_name(preflight.run(_connect(db)))
+        assert checks["one database role per service"].status == "fail"
+        assert login in checks["one database role per service"].detail
+        assert not preflight.go(list(checks.values()))
+        admin.execute(f'REVOKE yt_gateway FROM "{login}"')
+        again = _by_name(preflight.run(_connect(db)))
+        assert again["one database role per service"].status in ("ok", "warn")
+    finally:
+        admin.execute(f'DROP OWNED BY "{login}"')
+        admin.execute(f'DROP ROLE IF EXISTS "{login}"')
+        admin.close()

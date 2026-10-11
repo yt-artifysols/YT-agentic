@@ -98,3 +98,23 @@ def test_secret_fields_must_be_references_and_errors_do_not_echo_them() -> None:
 def test_unknown_settings_are_rejected() -> None:
     with pytest.raises(ValidationError):
         Settings(youtube_api_key="literal")  # type: ignore[call-arg]
+
+
+def test_production_workers_must_publish_through_the_gateway_service() -> None:
+    from ytcore.config import ConfigError
+
+    def check(**extra: object) -> None:
+        # Media adapters do not exist yet, so build the settings unvalidated and run the rule.
+        base = {k: v for k, v in PROD_OK.items() if k != "ENV"}
+        base |= {"env": Environment.PRODUCTION, "media_backend": "real"}
+        defaults = {"component": "worker", "gateway_url": "", "gateway_static_token_ref": ""}
+        Settings.model_construct(**{**base, **defaults, **extra})._enforce_environment()
+
+    with pytest.raises(ConfigError, match="gateway service"):
+        check()  # no gateway url
+    with pytest.raises(ConfigError, match="gateway service"):
+        check(gateway_url="http://gateway.internal")  # not https
+    with pytest.raises(ConfigError, match="gateway service"):
+        check(gateway_url="https://g.example", gateway_static_token_ref="vault://x#t")
+    check(gateway_url="https://g.example")  # a worker with the gateway configured is fine
+    check(component="gateway")  # the gateway, hub and ops jobs do not call a gateway

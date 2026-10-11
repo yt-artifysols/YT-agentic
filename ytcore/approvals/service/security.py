@@ -8,6 +8,7 @@ SHA-256 hashes server-side.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
 import secrets
 import threading
@@ -69,6 +70,7 @@ class Ceremony:
     expires: float
     user_id: str | None = None
     invite_token: str | None = None
+    subject: str | None = None  # step-up: the exact action this challenge authorises
 
 
 class CeremonyStore:
@@ -177,3 +179,10 @@ def require_role(ctx: AuthContext, *roles: Role) -> User:
     if ctx.user.role not in roles:
         raise HTTPException(403, f"requires role: {' or '.join(roles)}")
     return ctx.user
+
+
+def stepup_subject(purpose: str, parts: list[str]) -> str:
+    """The action a fresh passkey assertion authorises, computed by the server on both sides
+    (options and the action itself), so a challenge for one action never approves another."""
+    digest = hashlib.sha256("\n".join([purpose, *parts]).encode()).hexdigest()
+    return f"{purpose}:{digest}"

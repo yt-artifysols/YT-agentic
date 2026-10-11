@@ -40,6 +40,7 @@ def test_commands_named_in_runbooks_exist() -> None:
         "stuck": [],
         "pending-uploads": [],
         "preflight": [],
+        "grant-role": ["--role", "yt_ops", "--login", "x"],
         "plans": [],
         "adopt-upload": ["--upload", "u", "--video-id", "v"],
         "release-upload": ["--upload", "u", "--reason", "r"],

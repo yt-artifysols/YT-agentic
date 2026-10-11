@@ -36,6 +36,10 @@ variable "channel_ids" {
 variable "images" {
   type        = map(string)
   description = "Pinned image digests; required in production (no placeholder default)."
+  validation {
+    condition     = alltrue([for k, v in var.images : can(regex("@sha256:[0-9a-f]{64}$", v))])
+    error_message = "Production images must be pinned by digest (name@sha256:...)."
+  }
 }
 
 locals { env = "production" }

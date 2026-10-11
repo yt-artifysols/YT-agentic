@@ -14,8 +14,10 @@ from temporalio.worker import Worker
 
 from tests.harness import Keys, make_service
 from tests.integration.hubkit import Hub, build_hub
+from tests.integration.test_roles import as_role
 from ytcore.approvals.service.signals import TemporalSignaler
 from ytcore.gateway.clients import FakeYouTubeClient
+from ytcore.store.postgres import PostgresStore
 from ytcore.workflow.activities import JobActivities
 from ytcore.workflow.models import VideoJobInput, VideoJobResult
 from ytcore.workflow.states import JobState
@@ -32,8 +34,12 @@ class Rig:
         keys = Keys()
         self.hub: Hub = build_hub(database, signaler=TemporalSignaler(env.client), keys=keys)
         self.client = FakeYouTubeClient()
-        service = make_service(self.hub.store, keys, self.hub.assets, self.client, secrets)
-        self.activities = JobActivities(self.hub.store, service, self.hub.assets)
+        # Each service uses its own database role: the worker produces, the gateway publishes.
+        gateway_store = PostgresStore.from_conninfo(as_role(database, "yt_gateway"), keys.verifier)
+        service = make_service(gateway_store, keys, self.hub.assets, self.client, secrets)
+        self.activities = JobActivities(
+            self.hub.worker_store, service, self.hub.assets, hub_records_approvals=True
+        )
 
     def worker(self) -> Worker:
         return Worker(
@@ -44,7 +50,7 @@ class Rig:
         )
 
     async def start(self, channel_id: str) -> tuple[str, WorkflowHandle[Any, VideoJobResult]]:
-        job = self.hub.store.create_job(channel_id, "owner", actor="planner")
+        job = self.hub.worker_store.create_job(channel_id, "owner", actor="planner")
         handle = await self.env.client.start_workflow(
             VideoJobWorkflow.run,
             VideoJobInput(job_id=job, channel_id=channel_id, origin="owner"),

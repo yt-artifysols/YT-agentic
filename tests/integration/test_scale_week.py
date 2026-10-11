@@ -22,6 +22,7 @@ from typing import Any
 
 import psycopg
 import pytest
+from fastapi.testclient import TestClient
 from temporalio.client import WorkflowHandle
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
@@ -29,6 +30,7 @@ from temporalio.worker import Worker
 from tests.agentkit import BANNED  # noqa: F401  (documented knowledge fixtures live there)
 from tests.harness import Keys
 from tests.integration.conftest import fresh_database
+from tests.integration.test_roles import as_role
 from tests.scalekit import Faults, Flaky, UniqueImage, topic, write_fleet
 from ytcore.agents.fake import (
     FAKE_MUSIC_LICENSE,
@@ -44,12 +46,17 @@ from ytcore.approvals.service.repo import HubRepository
 from ytcore.channels.apply import apply_fleet
 from ytcore.channels.config import load_fleet
 from ytcore.gateway.assets import InMemoryAssetSource
+from ytcore.gateway.auth import StaticBearerAuthenticator
 from ytcore.gateway.clients import FakeYouTubeClient
+from ytcore.gateway.remote import RemoteGateway
+from ytcore.gateway.server import create_gateway_app
+from ytcore.gateway.service import PublishService
 from ytcore.inputs.models import InputKind
 from ytcore.inputs.store import PostgresInputs
-from ytcore.planner.daily import DailyPlanner
+from ytcore.planner.daily import DailyPlanner, PlanRepository
 from ytcore.planner.temporal import TemporalStarter
 from ytcore.secrets.provider import InMemorySecretsProvider
+from ytcore.store.postgres import PostgresStore
 from ytcore.workflow.models import ApprovalDecision, VideoJobResult
 from ytcore.workflow.states import TERMINAL_STATES, JobState
 from ytcore.workflow.supervisor import ClusterSupervisorWorkflow
@@ -58,6 +65,7 @@ from ytcore.workflow.worker import build_stack
 
 pytestmark = [pytest.mark.integration, pytest.mark.chaos]
 QUEUE = "scale-week"
+GATEWAY_TOKEN = "scale-week-gateway-token-0123456789"
 DAYS = 7
 APPROVER = "scale-approver"
 # (day, channel index): the humans do not approve in time / reject the video
@@ -110,7 +118,7 @@ async def _run(database: str, tmp_path: Path) -> None:
     assert not apply_fleet(connect, fleet).changed
 
     # Humans approve every proposed brand/policy document (agents and config only draft them).
-    hub = HubRepository.from_conninfo(db)
+    hub = HubRepository.from_conninfo(as_role(db, "yt_hub"))
     hub.create_user(APPROVER, "Approver", "approver", actor="hub:test")
     for doc_id, sha in _sql(db, "SELECT id::text, content_sha256 FROM knowledge_docs"):
         hub.decide_knowledge(doc_id, sha, username=APPROVER, approve=True)
@@ -140,16 +148,39 @@ async def _run(database: str, tmp_path: Path) -> None:
     values = {"vault://youtube-oauth-client": '{"client_id": "x", "client_secret": "y"}'}
     for ch in fleet.channels.values():  # dummy per-channel tokens: the references are real
         values[ch.youtube_credentials_ref] = "dummy-refresh"
+    # Every service connects as its own database role and the worker publishes only through the
+    # gateway service: the week runs with exactly the privileges each service has in production.
+    secrets = InMemorySecretsProvider(values)
+    gateway_store = PostgresStore.from_conninfo(as_role(db, "yt_gateway"), keys.verifier)
+    gateway_app = create_gateway_app(
+        PublishService(
+            repo=gateway_store, verifier=keys.verifier, client=youtube, assets=assets,
+            secrets=secrets,
+        ),
+        StaticBearerAuthenticator(GATEWAY_TOKEN),
+    )  # fmt: skip
+    remote = RemoteGateway(
+        "http://gateway.test", lambda: GATEWAY_TOKEN, client=TestClient(gateway_app)
+    )
+    hub_store = PostgresStore.from_conninfo(as_role(db, "yt_hub"), keys.verifier)
     stack = build_stack(
         _staging(),
-        InMemorySecretsProvider(values),
-        conninfo=db,
+        secrets,
+        conninfo=as_role(db, "yt_worker"),
         verifier=keys.verifier,
         assets=assets,
-        youtube=youtube,
         providers=providers,
         pool_poll_seconds=0.05,
+        gateway=remote,
     )
+    plans = PlanRepository.from_conninfo(as_role(db, "yt_ops"))
+
+    def approve(job: str, channel: str, content_hash: str) -> str:
+        """The human decision: only the hub role can record it. Returns the token."""
+        token = keys.token(job, channel, content_hash)
+        hub_store.verify_approval(job, token, actor=f"hub:{APPROVER}")
+        return token
+
     base = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
     handles: dict[str, WorkflowHandle[Any, Any]] = {}
     peak: dict[str, int] = {"queue": 0, "cluster_running": 0}
@@ -168,9 +199,7 @@ async def _run(database: str, tmp_path: Path) -> None:
         ),
     ):
         loop = asyncio.get_running_loop()
-        planner = DailyPlanner(
-            stack.plans, TemporalStarter(env.client, loop, QUEUE, supervised=True)
-        )
+        planner = DailyPlanner(plans, TemporalStarter(env.client, loop, QUEUE, supervised=True))
         stop = asyncio.Event()
 
         async def sampler() -> None:
@@ -226,13 +255,11 @@ async def _run(database: str, tmp_path: Path) -> None:
                     miss.append(p.job_id)
                     continue
                 ctx = stack.store.publish_context(p.job_id)
-                token = keys.token(p.job_id, p.channel_id, ctx.content_hash or "")
                 ok = not (p.attempt == 1 and (day, idx) in REJECTS)
+                token = approve(p.job_id, p.channel_id, ctx.content_hash or "") if ok else None
                 await handles[p.job_id].signal(
                     VideoJobWorkflow.submit_approval,
-                    ApprovalDecision(
-                        ok, APPROVER, token if ok else None, "" if ok else "off-brand"
-                    ),
+                    ApprovalDecision(ok, APPROVER, token, "" if ok else "off-brand"),
                 )
                 finish.append(p.job_id)
             for job in finish:
@@ -255,7 +282,7 @@ async def _run(database: str, tmp_path: Path) -> None:
             if stack.store.get_state(job) is not JobState.AWAITING_APPROVAL:
                 continue
             ctx = stack.store.publish_context(job)
-            token = keys.token(job, ctx.channel_id, ctx.content_hash or "")
+            token = approve(job, ctx.channel_id, ctx.content_hash or "")
             await handles[job].signal(
                 VideoJobWorkflow.submit_approval, ApprovalDecision(True, APPROVER, token)
             )

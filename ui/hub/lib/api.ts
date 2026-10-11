@@ -1,4 +1,5 @@
 // Typed client for the approval hub API (mirrors ytcore/approvals/service/openapi.json).
+import { startAuthentication } from "@simplewebauthn/browser";
 
 export type Role = "approver" | "operator" | "admin";
 
@@ -195,6 +196,25 @@ async function request<T>(method: "GET" | "POST", path: string, body?: unknown, 
   return (await res.json()) as T;
 }
 
+type StepUpPurpose = "approve" | "batch" | "release" | "tier_confirm" | "rollout_enable";
+interface StepUpProof {
+  ticket: string;
+  credential: unknown;
+}
+
+// A fresh passkey assertion for exactly one action: the server issues a challenge bound to the
+// action, the browser asks for the passkey (fingerprint, face or security key), and the proof is
+// sent with the action. A stolen session cookie alone cannot approve anything.
+async function stepUp(purpose: StepUpPurpose, parts: string[]): Promise<StepUpProof> {
+  const res = await request<{ ticket: string; options: Record<string, unknown> }>(
+    "POST",
+    "/api/auth/stepup/options",
+    { purpose, parts },
+  );
+  const credential = await startAuthentication(res.options as never);
+  return { ticket: res.ticket, credential };
+}
+
 export const api = {
   me: () => request<Me>("GET", "/api/auth/me"),
   logout: () => request<{ ok: boolean }>("POST", "/api/auth/logout", {}),
@@ -209,14 +229,20 @@ export const api = {
     return request<QueueItem[]>("GET", `/api/jobs${params.size ? `?${params}` : ""}`);
   },
   preview: (id: string) => request<Preview>("GET", `/api/jobs/${encodeURIComponent(id)}`),
-  approve: (id: string, content_hash: string) =>
-    request<{ jti: string }>("POST", `/api/jobs/${encodeURIComponent(id)}/approve`, { content_hash }),
+  approve: async (id: string, content_hash: string) =>
+    request<{ jti: string }>("POST", `/api/jobs/${encodeURIComponent(id)}/approve`, {
+      content_hash,
+      stepup: await stepUp("approve", [id, content_hash]),
+    }),
   edit: (id: string, body: { content_hash: string; title?: string; description?: string; tags?: string[]; script?: string }) =>
     request<{ content_hash: string; manifest_version: number }>("POST", `/api/jobs/${encodeURIComponent(id)}/edit`, body),
   reject: (id: string, body: { content_hash: string; reason: string; rework_stage: string }) =>
     request<{ ok: boolean }>("POST", `/api/jobs/${encodeURIComponent(id)}/reject`, body),
-  batchApprove: (items: { job_id: string; content_hash: string }[]) =>
-    request<{ results: { job_id: string; ok: boolean; error?: string | null }[] }>("POST", "/api/jobs/batch-approve", { items }),
+  batchApprove: async (items: { job_id: string; content_hash: string }[]) =>
+    request<{ results: { job_id: string; ok: boolean; error?: string | null }[] }>("POST", "/api/jobs/batch-approve", {
+      items,
+      stepup: await stepUp("batch", items.map((i) => `${i.job_id}:${i.content_hash}`)),
+    }),
 
   clusters: () => request<ClusterRow[]>("GET", "/api/clusters"),
   scorecards: (q: Record<string, string>) => {
@@ -226,23 +252,38 @@ export const api = {
   gate: (cluster: string) => request<Gate>("GET", `/api/rollout/${encodeURIComponent(cluster)}/gate`),
   signoff: (cluster: string, note: string) =>
     request<{ id: number }>("POST", `/api/rollout/${encodeURIComponent(cluster)}/signoff`, { note }),
-  enableCluster: (cluster: string) =>
-    request<{ ok: boolean }>("POST", `/api/rollout/${encodeURIComponent(cluster)}/enable`, {}),
+  enableCluster: async (cluster: string) =>
+    request<{ ok: boolean }>("POST", `/api/rollout/${encodeURIComponent(cluster)}/enable`, {
+      stepup: await stepUp("rollout_enable", [cluster]),
+    }),
 
   tiers: () => request<TierRow[]>("GET", "/api/tiers"),
   tierChanges: (channel = "") =>
     request<TierChange[]>("GET", `/api/tiers/changes${channel ? `?channel=${encodeURIComponent(channel)}` : ""}`),
   tierReport: (channel = "") =>
     request<TierReport>("GET", `/api/tiers/report${channel ? `?channel=${encodeURIComponent(channel)}` : ""}`),
-  confirmTier: (id: number, note: string) =>
-    request<{ ok: boolean }>("POST", `/api/tiers/recommendations/${id}/confirm`, { note }),
+  confirmTier: async (id: number, note: string) =>
+    request<{ ok: boolean }>("POST", `/api/tiers/recommendations/${id}/confirm`, {
+      note,
+      stepup: await stepUp("tier_confirm", [String(id)]),
+    }),
   dismissTier: (id: number, note: string) =>
     request<{ ok: boolean }>("POST", `/api/tiers/recommendations/${id}/dismiss`, { note }),
   recordStrike: (channel: string, body: { kind: string; note: string; video_ref?: string }) =>
     request<{ id: number }>("POST", `/api/channels/${encodeURIComponent(channel)}/strikes`, body),
 
   controls: () => request<Controls>("GET", "/api/controls"),
-  setGlobal: (paused: boolean, reason: string) => request<{ ok: boolean }>("POST", "/api/controls/global", { paused, reason }),
-  setScoped: (scope: "clusters" | "channels", id: string, paused: boolean, reason: string) =>
-    request<{ ok: boolean }>("POST", `/api/controls/${scope}/${encodeURIComponent(id)}`, { paused, reason }),
+  // Stopping is never blocked by the extra step; only RELEASING a switch needs the passkey.
+  setGlobal: async (paused: boolean, reason: string) =>
+    request<{ ok: boolean }>("POST", "/api/controls/global", {
+      paused,
+      reason,
+      stepup: paused ? undefined : await stepUp("release", ["global", "*"]),
+    }),
+  setScoped: async (scope: "clusters" | "channels", id: string, paused: boolean, reason: string) =>
+    request<{ ok: boolean }>("POST", `/api/controls/${scope}/${encodeURIComponent(id)}`, {
+      paused,
+      reason,
+      stepup: paused ? undefined : await stepUp("release", [scope.slice(0, -1), id]),
+    }),
 };

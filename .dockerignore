@@ -1,0 +1,12 @@
+.git
+.venv
+.env*
+*.pem
+.local
+tests
+docs
+site
+ui
+infra
+**/__pycache__
+**/node_modules

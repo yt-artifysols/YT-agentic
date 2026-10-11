@@ -91,6 +91,14 @@ class Settings(BaseSettings):
     database_url_ref: str = "env://DATABASE_URL"
     approval_public_key_ref: str = "env://APPROVAL_PUBLIC_KEY"
 
+    # The gateway runs as its own service. Workers call it; in production they hold no YouTube
+    # credentials and cannot upload (see ADR 0013).
+    component: Literal["worker", "gateway", "hub", "ops"] = "worker"  # which service this is
+    gateway_url: str = ""
+    gateway_audience: str = ""  # the gateway's own URL, as the ID-token audience
+    gateway_allowed_callers: tuple[str, ...] = ()  # service-account emails (gateway service only)
+    gateway_static_token_ref: str = ""  # dev/test only
+
     max_channels: int = Field(default=20, ge=1, le=20)
 
     # YouTube Data API quota costs per call (units), charged to the channel's Google project.
@@ -125,6 +133,13 @@ class Settings(BaseSettings):
                 raise ConfigError(
                     "production refuses fake media providers; real TTS/image/video/stock "
                     "adapters are not configured yet"
+                )
+            if self.component == "worker" and (
+                not self.gateway_url.startswith("https://") or self.gateway_static_token_ref
+            ):
+                raise ConfigError(
+                    "production workers publish only through the gateway service: set an "
+                    "https gateway_url and no static token"
                 )
         elif self.env is Environment.STAGING:
             if self.secrets_backend in FAKE_VALUES["secrets_backend"]:
