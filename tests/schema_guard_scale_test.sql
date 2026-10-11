@@ -129,6 +129,17 @@ SELECT pg_temp.expect_error(
     $$INSERT INTO pool_limits (scope, scope_id, pool, max_concurrent)
       VALUES ('cluster', 'ra', 'teleporter', 1)$$, '23514', 'only known pools');
 
+-- ---------------------------------------------------------------- gate cannot be weakened
+INSERT INTO clusters (id, display_name, requires_cluster, gate_days)
+VALUES ('rg', 'Gated', 'ra', 14);
+SELECT pg_temp.expect_error(
+    $$UPDATE clusters SET requires_cluster = NULL WHERE id = 'rg'$$, 'YTR01',
+    'a gate cannot be removed');
+SELECT pg_temp.expect_error(
+    $$UPDATE clusters SET gate_days = 1 WHERE id = 'rg'$$, 'YTR01', 'a gate cannot be shortened');
+SELECT pg_temp.expect_ok(
+    $$UPDATE clusters SET gate_days = 21 WHERE id = 'rg'$$, 'a gate can be lengthened');
+
 SELECT pg_temp.check(audit_chain_first_break() IS NULL, 'audit chain still verifies');
 
 ROLLBACK;

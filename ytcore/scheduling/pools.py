@@ -37,7 +37,7 @@ class PoolLimiter:
         self,
         connect: Connect,
         *,
-        lease_seconds: int = 1800,
+        lease_seconds: int = 3600,
         waiter_ttl_seconds: int = 120,
     ) -> None:
         self._connect = connect
