@@ -44,13 +44,18 @@ test("approver approves, edits and rejects; operator uses a kill switch", async 
   await addPasskeyDevice(page);
   await register(page, stack.invites.approver);
   await expect(page.getByTestId("whoami")).toContainText("approver");
+  await page.goto("/review");
   await expect(page.getByTestId("queue-row")).toHaveCount(3);
 
-  // Approve with the keyboard shortcut from the preview screen.
+  // Approving needs the "I reviewed this version" confirmation; there is no one-key approve.
   await openJob(page, stack.jobs.approve);
+  await page.getByRole("tab", { name: /Checks/ }).click();
   await expect(page.getByTestId("sources")).toBeVisible();
-  await expect(page.getByTestId("approve")).toBeVisible();
+  await expect(page.getByTestId("approve")).toBeDisabled();
   await page.keyboard.press("a");
+  await expect(page).not.toHaveURL(/done=approved/);
+  await page.getByTestId("reviewed").check();
+  await page.getByTestId("approve").click();
   await expect(page).toHaveURL(/done=approved/);
 
   // Edit: never approves; the job goes back to QA and returns with a diff.
@@ -70,6 +75,7 @@ test("approver approves, edits and rejects; operator uses a kill switch", async 
     .toBe(true);
   await expect(page.getByTestId("job-title")).toHaveText("Edited in the hub");
   await expect(page.getByTestId("diff-title")).toContainText("+ Edited in the hub");
+  await page.getByTestId("reviewed").check();
   await page.getByTestId("approve").click();
   await expect(page).toHaveURL(/done=approved/);
 
@@ -99,11 +105,11 @@ test("approver approves, edits and rejects; operator uses a kill switch", async 
   await addPasskeyDevice(op);
   await register(op, stack.invites.operator);
   await op.getByRole("link", { name: "Kill switches" }).click();
-  op.on("dialog", (d) => void d.accept());
   await op.getByPlaceholder("e.g. strike warning on channel").fill("e2e drill");
   await op.getByTestId(`toggle-channel-${stack.channel}`).click();
-  await expect(op.getByRole("status")).toContainText("paused");
+  await op.getByRole("dialog").getByRole("button", { name: "Pause" }).click();
+  await expect(op.locator(".toast").last()).toContainText("paused");
   await op.getByTestId(`toggle-channel-${stack.channel}`).click();
-  await expect(op.getByRole("status")).toContainText("resumed");
+  await expect(op.locator(".toast").last()).toContainText("resumed");
   await opCtx.close();
 });

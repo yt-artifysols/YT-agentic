@@ -28,8 +28,16 @@ from webauthn.helpers.structs import (
     UserVerificationRequirement,
 )
 
+from ytcore.approvals.service.console import ConsoleRepository
 from ytcore.approvals.service.hub import ApprovalHub, HubError
-from ytcore.approvals.service.repo import Credential, HubConflict, HubRepository, User, sha256
+from ytcore.approvals.service.repo import (
+    Credential,
+    HubConflict,
+    HubRepository,
+    User,
+    _is_uuid,
+    sha256,
+)
 from ytcore.approvals.service.security import (
     CEREMONY_COOKIE,
     AuthContext,
@@ -39,6 +47,7 @@ from ytcore.approvals.service.security import (
     SessionManager,
     check_origin,
     require_role,
+    stepup_subject,
 )
 from ytcore.approvals.service.settings import HubSettings
 from ytcore.channels.rollout import GateNotMet, RolloutService
@@ -55,6 +64,8 @@ from ytcore.store.errors import (
     StoreError,
     TierRefused,
 )
+
+STEPUP_TTL = 120.0  # seconds a step-up challenge stays valid
 
 # ----------------------------------------------------------------------------- schemas
 
@@ -163,8 +174,33 @@ class TierChangeOut(BaseModel):
     created_at: datetime
 
 
+class StepUpProof(BaseModel):
+    """A fresh passkey assertion for exactly one action (see /auth/stepup/options)."""
+
+    ticket: Annotated[str, Field(min_length=8, max_length=128)]
+    credential: dict[str, Any]
+
+
+class StepUpIn(BaseModel):
+    purpose: Literal[
+        "approve", "batch", "release", "tier_confirm", "tier_dismiss", "rollout_enable",
+        "rollout_signoff", "invite", "knowledge",
+    ]  # fmt: skip
+    parts: Annotated[list[Annotated[str, Field(max_length=200)]], Field(max_length=100)]
+
+
+class EnableIn(BaseModel):
+    stepup: StepUpProof | None = None
+
+
+class StepUpOut(BaseModel):
+    ticket: str
+    options: dict[str, Any]
+
+
 class TierDecisionIn(BaseModel):
     note: Annotated[str, Field(min_length=10, max_length=1000)]
+    stepup: StepUpProof | None = None
 
 
 class StrikeIn(BaseModel):
@@ -179,6 +215,7 @@ class StrikeOut(BaseModel):
 
 class ApproveIn(BaseModel):
     content_hash: ContentHash
+    stepup: StepUpProof | None = None
 
 
 class ApproveOut(BaseModel):
@@ -215,6 +252,7 @@ class BatchItemIn(BaseModel):
 
 class BatchIn(BaseModel):
     items: list[BatchItemIn] = Field(min_length=1, max_length=100)
+    stepup: StepUpProof | None = None
 
 
 class BatchItemOut(BaseModel):
@@ -290,6 +328,7 @@ class GateOut(BaseModel):
 
 class SignoffIn(BaseModel):
     note: str = Field(min_length=20, max_length=2000)
+    stepup: StepUpProof | None = None
 
 
 class SignoffOut(BaseModel):
@@ -299,12 +338,14 @@ class SignoffOut(BaseModel):
 class KillSwitchIn(BaseModel):
     paused: bool
     reason: str = Field(default="", max_length=500)
+    stepup: StepUpProof | None = None  # required to RELEASE a switch (engaging never needs it)
 
 
 class InviteIn(BaseModel):
     username: str = Field(pattern=r"^[a-z0-9][a-z0-9._@-]{2,63}$")
     display_name: str = Field(min_length=1, max_length=100)
     role: Literal["approver", "operator", "admin"]
+    stepup: StepUpProof | None = None
 
 
 class InviteOut(BaseModel):
@@ -358,6 +399,7 @@ class KnowledgeProposeIn(BaseModel):
 
 class KnowledgeDecisionIn(BaseModel):
     content_sha256: Sha256
+    stepup: StepUpProof | None = None
 
 
 class KnowledgeRejectIn(KnowledgeDecisionIn):
@@ -429,6 +471,7 @@ class HubDeps:
     limiter: RateLimiter
     inputs: InputStore | None = None
     rollout: RolloutService | None = None
+    console: ConsoleRepository | None = None
     knowledge: Any = None  # channel-bound knowledge repositories (proposals only)
 
 
@@ -457,20 +500,27 @@ def create_app(deps: HubDeps) -> FastAPI:
     async def hub_error(_: Request, exc: HubError) -> JSONResponse:
         return JSONResponse({"detail": str(exc)}, status_code=exc.status)
 
-    def client_key(request: Request) -> str:
-        # Signed-in users are limited per session; anonymous callers per client address.
-        session = request.cookies.get("hub_session")
-        if session:
-            return "s:" + sha256(session).hex()[:32]
+    def address_key(request: Request) -> str:
         if s.trust_forwarded_for:
-            forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+            # The proxy in front appends the real client address LAST; earlier entries are
+            # client-supplied and spoofable.
+            forwarded = request.headers.get("x-forwarded-for", "").split(",")[-1].strip()
             if forwarded:
                 return "f:" + forwarded
         return "a:" + (request.client.host if request.client else "unknown")
 
+    def client_key(request: Request, bucket: str) -> str:
+        # The unauthenticated endpoints are limited per client ADDRESS only: a cookie value is
+        # attacker-chosen there, so keying on it would let anyone rotate it past the limit.
+        # Other buckets run for signed-in callers and are limited per session.
+        session = request.cookies.get("hub_session")
+        if session and bucket != "auth":
+            return "s:" + sha256(session).hex()[:32]
+        return address_key(request)
+
     def limit(bucket: str, per_minute: int) -> Any:
         def dep(request: Request) -> None:
-            deps.limiter.check(client_key(request), bucket, per_minute)
+            deps.limiter.check(client_key(request, bucket), bucket, per_minute)
 
         return Depends(dep)
 
@@ -482,6 +532,47 @@ def create_app(deps: HubDeps) -> FastAPI:
     auth_limit = limit("auth", s.rate_auth_per_minute)
     write_limit = limit("write", s.rate_write_per_minute)
     read_limit = limit("read", s.rate_read_per_minute)
+
+    async def require_stepup(
+        ctx: AuthContext, proof: StepUpProof | None, purpose: str, parts: list[str]
+    ) -> None:
+        """A fresh passkey assertion for exactly this action, used once, within two minutes."""
+        if not s.require_stepup:
+            return
+        refused = HTTPException(428, "confirm with your passkey to continue")
+        if proof is None:
+            raise refused
+        try:
+            ceremony = deps.ceremonies.pop(proof.ticket, f"stepup:{purpose}")
+        except HTTPException:
+            raise refused from None
+        if ceremony.user_id != ctx.user.id or ceremony.subject != stepup_subject(purpose, parts):
+            raise refused
+        try:
+            raw_id = base64url_to_bytes(str(proof.credential.get("rawId", "")))
+            cred = await asyncio.to_thread(deps.repo.credential, raw_id)
+            if cred is None or cred.user_id != ctx.user.id:
+                raise refused
+            verified = verify_authentication_response(
+                credential=proof.credential,
+                expected_challenge=ceremony.challenge,
+                expected_rp_id=s.rp_id,
+                expected_origin=s.origin,
+                credential_public_key=cred.public_key,
+                credential_current_sign_count=cred.sign_count,
+                require_user_verification=True,
+            )
+        except HTTPException:
+            raise
+        except Exception:
+            await asyncio.to_thread(
+                deps.repo.audit, f"hub:{ctx.user.username}", "hub.stepup.failed",
+                f"user:{ctx.user.username}", {"purpose": purpose},
+            )  # fmt: skip
+            raise refused from None
+        await asyncio.to_thread(
+            deps.repo.bump_sign_count, cred.credential_id, verified.new_sign_count
+        )
 
     def me(user: User, csrf: str | None = None) -> Me:
         return Me(
@@ -664,6 +755,26 @@ def create_app(deps: HubDeps) -> FastAPI:
         user, csrf = await deps.sessions.rotate_csrf(token)
         return me(user, csrf)
 
+    @auth.post("/stepup/options", response_model=StepUpOut, dependencies=[write_limit])
+    async def stepup_options(body: StepUpIn, ctx: Session) -> StepUpOut:
+        """A challenge for ONE action; the passkey assertion that answers it is the proof."""
+        creds = await asyncio.to_thread(deps.repo.credentials_for, ctx.user.id)
+        options = generate_authentication_options(
+            rp_id=s.rp_id,
+            allow_credentials=[PublicKeyCredentialDescriptor(id=c.credential_id) for c in creds],
+            user_verification=UserVerificationRequirement.REQUIRED,
+        )
+        ticket = deps.ceremonies.put(
+            Ceremony(
+                options.challenge,
+                f"stepup:{body.purpose}",
+                time.monotonic() + STEPUP_TTL,
+                user_id=ctx.user.id,
+                subject=stepup_subject(body.purpose, body.parts),
+            )
+        )
+        return StepUpOut(ticket=ticket, options=json.loads(options_to_json(options)))
+
     app.include_router(auth)
 
     # ------------------------------------------------------------------ approvals
@@ -738,6 +849,7 @@ def create_app(deps: HubDeps) -> FastAPI:
     )  # fmt: skip
     async def rollout_signoff(cluster: str, body: SignoffIn, ctx: Session) -> SignoffOut:
         admin = require_role(ctx, "admin")
+        await require_stepup(ctx, body.stepup, "rollout_signoff", [cluster])
         try:
             sid = await asyncio.to_thread(
                 rollout_service().sign_off, cluster, admin.username, body.note
@@ -751,13 +863,84 @@ def create_app(deps: HubDeps) -> FastAPI:
     @api.post(
         "/rollout/{cluster}/enable", tags=["scale"], response_model=Ok, dependencies=[write_limit]
     )
-    async def rollout_enable(cluster: str, ctx: Session) -> Ok:
+    async def rollout_enable(cluster: str, ctx: Session, body: EnableIn | None = None) -> Ok:
         admin = require_role(ctx, "admin")
+        await require_stepup(ctx, body.stepup if body else None, "rollout_enable", [cluster])
         try:
             await asyncio.to_thread(rollout_service().enable, cluster, admin.username)
         except RolloutRefused as exc:
             raise HTTPException(409, str(exc)) from None
         return Ok()
+
+    def console_repo() -> ConsoleRepository:
+        if deps.console is None:
+            raise HTTPException(503, "the console is not configured")
+        return deps.console
+
+    @api.get(
+        "/overview", tags=["console"], response_model=dict[str, Any], dependencies=[read_limit]
+    )
+    async def overview(ctx: Session) -> dict[str, Any]:
+        """Today at a glance: approvals waiting, production, alerts, switches, cost, activity."""
+        return await asyncio.to_thread(console_repo().overview)
+
+    @api.get(
+        "/pipeline", tags=["console"], response_model=dict[str, Any], dependencies=[read_limit]
+    )
+    async def pipeline(
+        ctx: Session,
+        state: str | None = None,
+        channel: str | None = None,
+        cluster: str | None = None,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> dict[str, Any]:
+        try:
+            return await asyncio.to_thread(
+                console_repo().pipeline,
+                state=state, channel=channel, cluster=cluster, limit=limit, offset=offset,
+            )  # fmt: skip
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
+
+    @api.get(
+        "/jobs/{job_id}/timeline", tags=["console"], response_model=list[dict[str, Any]],
+        dependencies=[read_limit],
+    )  # fmt: skip
+    async def job_timeline(job_id: str, ctx: Session) -> list[dict[str, Any]]:
+        rows = (
+            await asyncio.to_thread(console_repo().timeline, job_id) if _is_uuid(job_id) else None
+        )
+        if rows is None:
+            raise HTTPException(404, "job not found")
+        return rows
+
+    @api.get(
+        "/channels",
+        tags=["console"],
+        response_model=list[dict[str, Any]],
+        dependencies=[read_limit],
+    )
+    async def channel_list(ctx: Session) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(console_repo().channels)
+
+    @api.get(
+        "/channels/{channel_id}", tags=["console"], response_model=dict[str, Any],
+        dependencies=[read_limit],
+    )  # fmt: skip
+    async def channel_detail(channel_id: str, ctx: Session) -> dict[str, Any]:
+        row = await asyncio.to_thread(console_repo().channel, channel_id)
+        if row is None:
+            raise HTTPException(404, "channel not found")
+        return row
+
+    @api.get(
+        "/admin/users", tags=["admin"], response_model=list[dict[str, Any]],
+        dependencies=[read_limit],
+    )  # fmt: skip
+    async def admin_users(ctx: Session) -> list[dict[str, Any]]:
+        require_role(ctx, "admin")
+        return await asyncio.to_thread(console_repo().users)
 
     @api.get("/tiers", tags=["tiers"], response_model=list[TierRowOut], dependencies=[read_limit])
     async def tiers(ctx: Session) -> list[TierRowOut]:
@@ -788,6 +971,7 @@ def create_app(deps: HubDeps) -> FastAPI:
     )  # fmt: skip
     async def tier_confirm(rid: int, body: TierDecisionIn, ctx: Session) -> Ok:
         admin = require_role(ctx, "admin")
+        await require_stepup(ctx, body.stepup, "tier_confirm", [str(rid)])
         try:
             await asyncio.to_thread(deps.repo.tiers.confirm, rid, admin.username, body.note)
         except LookupError as exc:
@@ -802,6 +986,7 @@ def create_app(deps: HubDeps) -> FastAPI:
     )  # fmt: skip
     async def tier_dismiss(rid: int, body: TierDecisionIn, ctx: Session) -> Ok:
         admin = require_role(ctx, "admin")
+        await require_stepup(ctx, body.stepup, "tier_dismiss", [str(rid)])
         try:
             await asyncio.to_thread(deps.repo.tiers.dismiss, rid, admin.username, body.note)
         except LookupError as exc:
@@ -907,6 +1092,7 @@ def create_app(deps: HubDeps) -> FastAPI:
     @api.post("/jobs/{job_id}/approve", response_model=ApproveOut, dependencies=[write_limit])
     async def approve(job_id: str, body: ApproveIn, ctx: Session) -> ApproveOut:
         user = require_role(ctx, "approver")
+        await require_stepup(ctx, body.stepup, "approve", [job_id, body.content_hash])
         res = await deps.hub.approve(job_id, body.content_hash, user)
         return ApproveOut(**res.__dict__)
 
@@ -926,6 +1112,9 @@ def create_app(deps: HubDeps) -> FastAPI:
     @api.post("/jobs/batch-approve", response_model=BatchOut, dependencies=[write_limit])
     async def batch_approve(body: BatchIn, ctx: Session) -> BatchOut:
         user = require_role(ctx, "approver")
+        await require_stepup(
+            ctx, body.stepup, "batch", [f"{i.job_id}:{i.content_hash}" for i in body.items]
+        )
         results = await deps.hub.batch_approve(
             [(i.job_id, i.content_hash) for i in body.items], user
         )
@@ -948,6 +1137,8 @@ def create_app(deps: HubDeps) -> FastAPI:
     @api.post("/controls/global", tags=["controls"], response_model=Ok, dependencies=[write_limit])
     async def kill_global(body: KillSwitchIn, ctx: Session) -> Ok:
         user = require_role(ctx, "operator", "admin")
+        if not body.paused:  # releasing is the dangerous direction; engaging never needs proof
+            await require_stepup(ctx, body.stepup, "release", ["global", "*"])
         await deps.hub.set_kill_switch("global", None, body.paused, body.reason, user)
         return Ok()
 
@@ -959,6 +1150,8 @@ def create_app(deps: HubDeps) -> FastAPI:
         scope: Literal["clusters", "channels"], ident: str, body: KillSwitchIn, ctx: Session
     ) -> Ok:
         user = require_role(ctx, "operator", "admin")
+        if not body.paused:
+            await require_stepup(ctx, body.stepup, "release", [scope[:-1], ident])
         await deps.hub.set_kill_switch(scope[:-1], ident, body.paused, body.reason, user)
         return Ok()
 
@@ -968,6 +1161,8 @@ def create_app(deps: HubDeps) -> FastAPI:
               dependencies=[write_limit])  # fmt: skip
     async def invite(body: InviteIn, ctx: Session) -> InviteOut:
         admin = require_role(ctx, "admin")
+        # Minting a user is minting an approver: it needs the same fresh passkey proof.
+        await require_stepup(ctx, body.stepup, "invite", [body.username, body.role])
         user = await asyncio.to_thread(
             deps.repo.create_user, body.username, body.display_name, body.role,
             actor=f"hub:{admin.username}",
@@ -1036,6 +1231,9 @@ def create_app(deps: HubDeps) -> FastAPI:
         doc_id: str, body: KnowledgeDecisionIn, ctx: Session
     ) -> KnowledgeDocOut:
         user = require_role(ctx, "approver")
+        await require_stepup(
+            ctx, body.stepup, "knowledge", [doc_id, "approve", body.content_sha256]
+        )
         try:
             doc = await asyncio.to_thread(
                 deps.repo.decide_knowledge, doc_id, body.content_sha256,
@@ -1051,6 +1249,7 @@ def create_app(deps: HubDeps) -> FastAPI:
         doc_id: str, body: KnowledgeRejectIn, ctx: Session
     ) -> KnowledgeDocOut:
         user = require_role(ctx, "approver")
+        await require_stepup(ctx, body.stepup, "knowledge", [doc_id, "reject", body.content_sha256])
         try:
             doc = await asyncio.to_thread(
                 deps.repo.decide_knowledge, doc_id, body.content_sha256,

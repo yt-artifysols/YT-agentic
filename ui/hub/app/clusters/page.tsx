@@ -1,98 +1,62 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { api, type ClusterRow, type Gate } from "@/lib/api";
-import { useMe } from "@/lib/useMe";
+import { useState } from "react";
+import { Badge, Button, Card, Field, Notice, PageHead, SkeletonList, useToast } from "@/components/ui";
+import { api, type Gate } from "@/lib/api";
+import { dateTime, relTime } from "@/lib/format";
+import { useSession } from "@/lib/session";
+import { useApi } from "@/lib/useApi";
 
 export default function ClustersPage() {
-  const me = useMe();
-  const [rows, setRows] = useState<ClusterRow[]>([]);
+  const { me } = useSession();
+  const toast = useToast();
+  const { data, error, loading, reload } = useApi(() => api.clusters(), []);
   const [gates, setGates] = useState<Record<string, Gate>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
-  const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
-
-  const load = () => api.clusters().then(setRows).catch((e: Error) => setMessage({ kind: "err", text: e.message }));
-  useEffect(() => {
-    if (me) void load();
-  }, [me]);
-
-  if (!me) return null;
-  const canSee = me.role !== "approver";
+  const staff = me?.role !== "approver";
   const act = async (fn: () => Promise<unknown>, ok: string) => {
     try {
       await fn();
-      setMessage({ kind: "ok", text: ok });
-      await load();
+      toast("ok", ok);
+      await reload();
     } catch (e) {
-      setMessage({ kind: "err", text: (e as Error).message });
+      toast("err", (e as Error).message);
     }
   };
-
   return (
-    <>
-      <h1>Clusters</h1>
-      {message && <div className={`notice ${message.kind}`} role="status">{message.text}</div>}
-      <div className="card" style={{ padding: 0, overflowX: "auto" }}>
-        <table>
-          <thead>
-            <tr><th>Cluster</th><th>Niche</th><th>Status</th><th>Live</th><th>Channels</th><th>Waiting</th><th>Oldest waiting</th><th>Supervisor</th><th /></tr>
-          </thead>
-          <tbody>
-            {rows.map((c) => (
-              <tr key={c.id} data-testid="cluster-row">
-                <td className="mono">{c.id}</td>
-                <td>{c.niche || "-"}</td>
-                <td>{c.status}</td>
-                <td>
-                  {c.live_enabled ? `live since ${c.live_since ? new Date(c.live_since).toLocaleDateString() : "?"}` : `dark (needs ${c.requires_cluster ?? "-"})`}
-                </td>
-                <td>{c.channels}</td>
-                <td>{c.awaiting_approval}</td>
-                <td className="mono">{c.oldest_waiting_since ? new Date(c.oldest_waiting_since).toLocaleString() : "-"}</td>
-                <td className="mono">
-                  {c.health ? `${c.health.running} running / ${c.health.pending} pending${c.health.budget_held ? " (budget held)" : ""}` : "-"}
-                </td>
-                <td>
-                  {canSee && <button onClick={() => api.gate(c.id).then((g) => setGates({ ...gates, [c.id]: g }))}>Gate report</button>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {Object.values(gates).map((g) => (
-        <div className="card" key={g.cluster_id} style={{ marginTop: 12 }}>
-          <h3>Gate: {g.cluster_id}</h3>
-          <p>
-            Live {g.live_days.toFixed(1)} of {g.required_days} days · {g.decisions} human decisions
-            {g.rejection_rate !== null && ` (${Math.round(g.rejection_rate * 100)}% rejected)`} · {g.scorecard_days} scorecards ·
-            {` ${g.breaker_trips} breaker trips · ${g.stuck_or_plan_alerts} alerts · ${g.failed_uploads} failed uploads`}
-          </p>
-          {g.problems.length ? (
-            <ul>{g.problems.map((p) => <li key={p}>{p}</li>)}</ul>
-          ) : (
-            <p className="notice ok">The measured evidence is good.</p>
-          )}
-          {me.role === "admin" && (
-            <div className="row">
-              <input
-                placeholder="Your review: what you looked at and why this cluster is stable (20+ characters)"
-                value={notes[g.cluster_id] ?? ""}
-                onChange={(e) => setNotes({ ...notes, [g.cluster_id]: e.target.value })}
-                style={{ flex: 1 }}
-              />
-              <button disabled={!g.ok} onClick={() => act(() => api.signoff(g.cluster_id, notes[g.cluster_id] ?? ""), "Signed off")}>
-                Sign off
-              </button>
-              {rows.filter((r) => r.requires_cluster === g.cluster_id && !r.live_enabled).map((r) => (
-                <button key={r.id} className="primary" onClick={() => act(() => api.enableCluster(r.id), `${r.id} enabled`)}>
-                  Enable {r.id}
-                </button>
-              ))}
+    <div className="stack">
+      <PageHead title="Clusters" sub="Cluster B cannot go live until cluster A has run cleanly and an admin signed off." />
+      {error && <Notice tone="err">{error}</Notice>}
+      {loading && !data && <SkeletonList />}
+      {data?.map((c) => {
+        const g = gates[c.id];
+        return (
+          <Card key={c.id} title={`${c.display_name || c.id}`} action={<Badge tone={c.live_enabled ? "ok" : ""}>{c.live_enabled ? `Live since ${c.live_since ? dateTime(c.live_since) : "?"}` : `Not live (needs ${c.requires_cluster ?? "nothing"})`}</Badge>}>
+            <div data-testid="cluster-row" className="stack">
+              <div className="muted small">{c.niche || "-"} · {c.channels} channels · {c.awaiting_approval} waiting{c.oldest_waiting_since ? ` · oldest ${relTime(c.oldest_waiting_since)}` : ""}</div>
+              {c.health && <div className="faint small">Supervisor: {String(c.health.running)} running, {String(c.health.pending)} pending{c.health.budget_held ? " (budget held)" : ""}</div>}
+              {staff && <div><Button size="small" onClick={() => void api.gate(c.id).then((x) => setGates({ ...gates, [c.id]: x }))}>Rollout gate report</Button></div>}
+              {g && (
+                <div className="stack">
+                  <div className="small">Live {g.live_days.toFixed(1)} of {g.required_days} days · {g.decisions} decisions{g.rejection_rate !== null && ` (${Math.round(g.rejection_rate * 100)}% rejected)`} · {g.breaker_trips} breaker trips · {g.failed_uploads} failed uploads</div>
+                  {g.problems.length ? <Notice tone="warn"><ul>{g.problems.map((p) => <li key={p}>{p}</li>)}</ul></Notice> : <Notice tone="ok">The measured evidence is good.</Notice>}
+                  {me?.role === "admin" && (
+                    <>
+                      <Field label="Your review (20+ characters)">{(id) => <input id={id} className="input" value={notes[g.cluster_id] ?? ""} onChange={(e) => setNotes({ ...notes, [g.cluster_id]: e.target.value })} />}</Field>
+                      <div className="row">
+                        <Button disabled={!g.ok} onClick={() => void act(() => api.signoff(g.cluster_id, notes[g.cluster_id] ?? ""), "Signed off")}>Sign off</Button>
+                        {data.filter((r) => r.requires_cluster === g.cluster_id && !r.live_enabled).map((r) => (
+                          <Button key={r.id} variant="primary" onClick={() => void act(() => api.enableCluster(r.id), `${r.id} enabled`)}>Enable {r.id}</Button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
-          )}
-        </div>
-      ))}
-    </>
+          </Card>
+        );
+      })}
+    </div>
   );
 }

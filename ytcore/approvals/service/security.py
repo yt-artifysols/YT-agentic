@@ -8,6 +8,7 @@ SHA-256 hashes server-side.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
 import secrets
 import threading
@@ -36,13 +37,24 @@ class RateLimiter:
     """Sliding-window limiter per (client, bucket). In-process: run one hub instance or move
     this to a shared store before scaling out."""
 
+    MAX_KEYS = 50_000  # bounded memory: callers can invent keys
+
     def __init__(self) -> None:
         self._hits: dict[tuple[str, str], deque[float]] = defaultdict(deque)
         self._lock = threading.Lock()
 
+    def _prune(self, now: float) -> None:
+        stale = [k for k, h in self._hits.items() if not h or now - h[-1] > 60]
+        for key in stale:
+            del self._hits[key]
+        while len(self._hits) > self.MAX_KEYS:  # still too many live keys: drop the oldest
+            del self._hits[next(iter(self._hits))]
+
     def check(self, client: str, bucket: str, per_minute: int) -> None:
         now = time.monotonic()
         with self._lock:
+            if len(self._hits) > self.MAX_KEYS:
+                self._prune(now)
             hits = self._hits[(client, bucket)]
             while hits and now - hits[0] > 60:
                 hits.popleft()
@@ -58,6 +70,7 @@ class Ceremony:
     expires: float
     user_id: str | None = None
     invite_token: str | None = None
+    subject: str | None = None  # step-up: the exact action this challenge authorises
 
 
 class CeremonyStore:
@@ -166,3 +179,10 @@ def require_role(ctx: AuthContext, *roles: Role) -> User:
     if ctx.user.role not in roles:
         raise HTTPException(403, f"requires role: {' or '.join(roles)}")
     return ctx.user
+
+
+def stepup_subject(purpose: str, parts: list[str]) -> str:
+    """The action a fresh passkey assertion authorises, computed by the server on both sides
+    (options and the action itself), so a challenge for one action never approves another."""
+    digest = hashlib.sha256("\n".join([purpose, *parts]).encode()).hexdigest()
+    return f"{purpose}:{digest}"

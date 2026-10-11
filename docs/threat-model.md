@@ -23,7 +23,8 @@ changes.
 2. **Orchestration/agents ↔ external content**: web pages, transcripts, comments and trends are
    untrusted DATA.
 3. **Agents ↔ knowledge base**: agents may only submit drafts; humans approve changes.
-4. **Workers ↔ YouTube gateway**: workers request a publish; the gateway verifies the token.
+4. **Workers ↔ YouTube gateway**: workers request a publish over authenticated HTTP (Cloud Run
+   IAM plus an ID-token check); the gateway service verifies the token.
 5. **Gateway ↔ YouTube API**: the only egress to the upload API; holds per-channel tokens.
 6. **Services ↔ secrets manager**: per-service accounts with least-privilege access.
 7. **CI/CD and dependencies ↔ runtime**: build-time code becomes runtime code.
@@ -49,15 +50,17 @@ changes.
 - The research web fetcher refuses non-https and non-public addresses (SSRF); DNS rebinding
   between the check and the connect is not fully closed (resolve-and-pin is a follow-up).
 - Real media providers (TTS, image, video, stock) are not chosen; production refuses the fakes.
-- `app.actor` is attribution, not authentication; knowledge approval therefore checks the
-  approver against active `hub_users` with the approver role, but per-service DB roles are
-  still needed to stop a compromised worker from writing as the hub.
+- `app.actor` is still attribution, not authentication. Since migration 014 it no longer
+  matters for human-only actions: the worker, gateway and ops roles have no privilege to approve,
+  sign off, release a kill switch or confirm a tier change (ADR 0013). Any role can still call
+  `audit()` (append-only, hash-chained), so a compromised service could add misleading audit
+  rows; it cannot change or remove existing ones.
 - Approval hub identity is passkey-based (ADR 0006); recovery for lost passkeys is an admin
   re-invite and must stay a manual, audited step.
 - Hub WebAuthn challenges and rate limits are in-process (single instance) for now.
 - Phase 3: elections/political-ads policy page was not fetched; review `docs/policy-sources.md`.
-- Phase 3: the fingerprint index is a shared platform table; per-service DB roles are needed so
-  only QA/safety code can read it.
+- Phase 3: the fingerprint index is a shared platform table; every service role can read it
+  (the worker runs QA); finer column/row separation is not done.
 - Phase 3: the circuit breaker must be scheduled (cron/Temporal schedule); thresholds are defaults.
 - Phase 4: the cloud secrets provider reads Secret Manager with the service account's own
   identity; per-service database roles are still missing (every service holds the same DSN).

@@ -15,8 +15,14 @@ const csp = [
   "form-action 'self'",
 ].join("; ");
 
+// Design-review build: static export with in-browser sample data (lib/demo.ts). Never used
+// for the real hub, which needs the headers and API proxy below.
+const demo = process.env.NEXT_PUBLIC_DEMO === "1";
+
 /** @type {import('next').NextConfig} */
-const nextConfig = {
+const nextConfig = demo
+  ? { reactStrictMode: true, output: "export", basePath: "/hub-demo", trailingSlash: true, images: { unoptimized: true } }
+  : {
   reactStrictMode: true,
   poweredByHeader: false,
   async rewrites() {

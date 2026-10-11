@@ -82,3 +82,18 @@ def test_tiers_are_not_part_of_any_publish_path() -> None:
         assert not any(m.startswith(forbidden) for m in _imports(path)), path
     sql = (ROOT / "ytcore/db/migrations/013_autonomy_tiers.sql").read_text()
     assert "approvals" not in sql.replace("hub_users", "")  # the approval gate is untouched
+
+
+def test_the_production_hub_refuses_a_blind_in_memory_asset_store() -> None:
+    from ytcore.approvals.service.main import resolve_assets
+    from ytcore.approvals.service.settings import HubSettings
+    from ytcore.gateway.assets import InMemoryAssetSource
+
+    prod = HubSettings.model_construct(env="production")
+    with pytest.raises(RuntimeError, match="real asset source"):
+        resolve_assets(prod, None)
+    real = InMemoryAssetSource()
+    assert resolve_assets(prod, real) is real
+    assert isinstance(
+        resolve_assets(HubSettings.model_construct(env="dev"), None), InMemoryAssetSource
+    )

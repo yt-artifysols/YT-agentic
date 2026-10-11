@@ -13,6 +13,7 @@ import psycopg
 from tests.harness import Keys, drive_to_awaiting
 from tests.softauthn import SoftAuthenticator
 from ytcore.approvals.service.app import HubDeps, create_app
+from ytcore.approvals.service.console import ConsoleRepository
 from ytcore.approvals.service.hub import ApprovalHub
 from ytcore.approvals.service.notify import FakeNotifier
 from ytcore.approvals.service.repo import HubRepository, User
@@ -39,6 +40,7 @@ class Hub:
     assets: InMemoryAssetSource
     app: Any
     conninfo: str = ""
+    worker_store: PostgresStore = None  # type: ignore[assignment]
     authenticators: dict[str, SoftAuthenticator] = field(default_factory=dict)
 
     def promote(self, channel_id: str) -> None:
@@ -61,6 +63,20 @@ class Hub:
             base_url=ORIGIN,
             headers={"Origin": ORIGIN},
         )
+
+    async def stepup(
+        self, client: httpx.AsyncClient, username: str, csrf: str, purpose: str, parts: list[str]
+    ) -> dict[str, Any]:
+        """A fresh passkey assertion for one action, as the browser would produce it."""
+        res = await client.post(
+            "/api/auth/stepup/options",
+            json={"purpose": purpose, "parts": parts},
+            headers={"x-csrf-token": csrf},
+        )
+        assert res.status_code == 200, res.text
+        body = res.json()
+        credential = self.authenticators[username].get(body["options"])
+        return {"ticket": body["ticket"], "credential": credential}
 
     def invite(self, username: str, role: str) -> tuple[User, str]:
         user = self.repo.create_user(username, username.title(), role, actor="hub:test")  # type: ignore[arg-type]
@@ -93,9 +109,11 @@ class Hub:
         return str(res.json()["csrf_token"])
 
     def awaiting_job(self, channel_id: str, *, risk: int = 10, flags: int = 0) -> tuple[str, str]:
-        job = self.store.create_job(channel_id, "owner", actor="planner")
-        chash = drive_to_awaiting(self.store, self.assets, job, channel_id)
-        self.store.record_qa(
+        # Production is the worker's job (its own database role); the hub only reviews.
+        worker = self.worker_store
+        job = worker.create_job(channel_id, "owner", actor="planner")
+        chash = drive_to_awaiting(worker, self.assets, job, channel_id)
+        worker.record_qa(
             job,
             passed=True,
             risk_score=risk,
@@ -113,8 +131,11 @@ def build_hub(
     keys: Keys | None = None,
     **overrides: Any,
 ) -> Hub:
+    overrides.setdefault("require_stepup", False)  # tests of the step-up itself turn it on
     settings = HubSettings(origin=ORIGIN, rp_id="localhost", **overrides)
     keys = keys or Keys()
+    raw_conninfo = conninfo
+    conninfo = f"{conninfo} options='-c role=yt_hub'"  # the hub runs with the hub role only
     repo = HubRepository.from_conninfo(conninfo, fast_lane_max_risk=settings.fast_lane_max_risk)
     store = PostgresStore.from_conninfo(conninfo, keys.verifier)
     signaler = signaler or FakeSignaler()
@@ -140,6 +161,7 @@ def build_hub(
             limiter=RateLimiter(),
             inputs=PostgresInputs.from_conninfo(conninfo),
             rollout=RolloutService(lambda: psycopg.connect(conninfo, autocommit=True)),
+            console=ConsoleRepository(lambda: psycopg.connect(conninfo, autocommit=True)),
             knowledge=PostgresKnowledge.from_conninfo(conninfo),
         )
     )
@@ -149,4 +171,9 @@ def build_hub(
             "'{\"spot_check_percent\": 0}') ON CONFLICT (singleton) DO UPDATE SET rules = "
             "EXCLUDED.rules"
         )
-    return Hub(settings, repo, store, keys, signaler, notifier, assets, app, conninfo)
+    worker_store = PostgresStore.from_conninfo(
+        f"{raw_conninfo} options='-c role=yt_worker'", keys.verifier
+    )
+    return Hub(
+        settings, repo, store, keys, signaler, notifier, assets, app, raw_conninfo, worker_store
+    )

@@ -49,3 +49,6 @@ pgdata/
 .vscode/
 *.swp
 .DS_Store
+
+ui/hub/out/
+site/hub-demo/

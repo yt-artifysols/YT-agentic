@@ -72,6 +72,16 @@
             "pattern": "^sha256:[0-9a-f]{64}$",
             "title": "Content Hash",
             "type": "string"
+          },
+          "stepup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StepUpProof"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -141,6 +151,16 @@
             "minItems": 1,
             "title": "Items",
             "type": "array"
+          },
+          "stepup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StepUpProof"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -455,6 +475,22 @@
         "title": "EditOut",
         "type": "object"
       },
+      "EnableIn": {
+        "properties": {
+          "stepup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StepUpProof"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "EnableIn",
+        "type": "object"
+      },
       "GateOut": {
         "properties": {
           "breaker_trips": {
@@ -568,6 +604,16 @@
             "title": "Role",
             "type": "string"
           },
+          "stepup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StepUpProof"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "username": {
             "pattern": "^[a-z0-9][a-z0-9._@-]{2,63}$",
             "title": "Username",
@@ -632,6 +678,16 @@
             "maxLength": 500,
             "title": "Reason",
             "type": "string"
+          },
+          "stepup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StepUpProof"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -646,6 +702,16 @@
             "pattern": "^sha256:[0-9a-f]{64}$",
             "title": "Content Sha256",
             "type": "string"
+          },
+          "stepup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StepUpProof"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -935,6 +1001,16 @@
             "minLength": 3,
             "title": "Reason",
             "type": "string"
+          },
+          "stepup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StepUpProof"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -1625,6 +1701,16 @@
             "minLength": 20,
             "title": "Note",
             "type": "string"
+          },
+          "stepup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StepUpProof"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -1644,6 +1730,81 @@
           "id"
         ],
         "title": "SignoffOut",
+        "type": "object"
+      },
+      "StepUpIn": {
+        "properties": {
+          "parts": {
+            "items": {
+              "maxLength": 200,
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Parts",
+            "type": "array"
+          },
+          "purpose": {
+            "enum": [
+              "approve",
+              "batch",
+              "release",
+              "tier_confirm",
+              "tier_dismiss",
+              "rollout_enable",
+              "rollout_signoff",
+              "invite",
+              "knowledge"
+            ],
+            "title": "Purpose",
+            "type": "string"
+          }
+        },
+        "required": [
+          "purpose",
+          "parts"
+        ],
+        "title": "StepUpIn",
+        "type": "object"
+      },
+      "StepUpOut": {
+        "properties": {
+          "options": {
+            "additionalProperties": true,
+            "title": "Options",
+            "type": "object"
+          },
+          "ticket": {
+            "title": "Ticket",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket",
+          "options"
+        ],
+        "title": "StepUpOut",
+        "type": "object"
+      },
+      "StepUpProof": {
+        "description": "A fresh passkey assertion for exactly one action (see /auth/stepup/options).",
+        "properties": {
+          "credential": {
+            "additionalProperties": true,
+            "title": "Credential",
+            "type": "object"
+          },
+          "ticket": {
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Ticket",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket",
+          "credential"
+        ],
+        "title": "StepUpProof",
         "type": "object"
       },
       "StrikeIn": {
@@ -1774,6 +1935,16 @@
             "minLength": 10,
             "title": "Note",
             "type": "string"
+          },
+          "stepup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StepUpProof"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -1970,6 +2141,33 @@
           }
         },
         "summary": "Invite",
+        "tags": [
+          "approvals",
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/users": {
+      "get": {
+        "operationId": "admin_users_api_admin_users_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Admin Users Api Admin Users Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Admin Users",
         "tags": [
           "approvals",
           "admin"
@@ -2248,6 +2446,120 @@
         "summary": "Register Verify",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/api/auth/stepup/options": {
+      "post": {
+        "description": "A challenge for ONE action; the passkey assertion that answers it is the proof.",
+        "operationId": "stepup_options_api_auth_stepup_options_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StepUpIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StepUpOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stepup Options",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/channels": {
+      "get": {
+        "operationId": "channel_list_api_channels_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Channel List Api Channels Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Channel List",
+        "tags": [
+          "approvals",
+          "console"
+        ]
+      }
+    },
+    "/api/channels/{channel_id}": {
+      "get": {
+        "operationId": "channel_detail_api_channels__channel_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "title": "Channel Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Channel Detail Api Channels  Channel Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Channel Detail",
+        "tags": [
+          "approvals",
+          "console"
         ]
       }
     },
@@ -3122,6 +3434,54 @@
         ]
       }
     },
+    "/api/jobs/{job_id}/timeline": {
+      "get": {
+        "operationId": "job_timeline_api_jobs__job_id__timeline_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Job Timeline Api Jobs  Job Id  Timeline Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Job Timeline",
+        "tags": [
+          "approvals",
+          "console"
+        ]
+      }
+    },
     "/api/knowledge/drafts": {
       "get": {
         "operationId": "knowledge_drafts_api_knowledge_drafts_get",
@@ -3321,6 +3681,138 @@
         ]
       }
     },
+    "/api/overview": {
+      "get": {
+        "description": "Today at a glance: approvals waiting, production, alerts, switches, cost, activity.",
+        "operationId": "overview_api_overview_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Overview Api Overview Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Overview",
+        "tags": [
+          "approvals",
+          "console"
+        ]
+      }
+    },
+    "/api/pipeline": {
+      "get": {
+        "operationId": "pipeline_api_pipeline_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Channel"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cluster",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cluster"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Pipeline Api Pipeline Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pipeline",
+        "tags": [
+          "approvals",
+          "console"
+        ]
+      }
+    },
     "/api/rollout/{cluster}/enable": {
       "post": {
         "operationId": "rollout_enable_api_rollout__cluster__enable_post",
@@ -3335,6 +3827,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/EnableIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {

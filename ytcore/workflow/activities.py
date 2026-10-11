@@ -139,7 +139,11 @@ class JobActivities:
         limiter: PoolLimiter | None = None,
         pool_poll_seconds: float = 1.0,
         pool_max_wait_seconds: float = 1500.0,
+        hub_records_approvals: bool = False,
     ) -> None:
+        # True in production: the worker's database role cannot record approvals, so it only
+        # ever accepts an approval the hub already recorded (never tries to record one).
+        self._hub_records = hub_records_approvals
         self._replanner = replanner
         self._limiter = limiter
         self._pool_poll = pool_poll_seconds
@@ -301,6 +305,14 @@ class JobActivities:
     @observed("approve")
     async def approve(self, job_id: str, token: str) -> str:
         """Consume the approval token and move the job to approved. Returns the approver."""
+        if self._hub_records:
+            recorded = await asyncio.to_thread(self._backend.approval_on_record, job_id, token)
+            if recorded is None:
+                raise _non_retryable(
+                    ApprovalInvalid("no recorded approval for this token and content"),
+                    "ApprovalRejected",
+                )
+            return recorded.approver
         try:
             claims = await asyncio.to_thread(
                 self._backend.verify_approval, job_id, token, actor=ACTOR

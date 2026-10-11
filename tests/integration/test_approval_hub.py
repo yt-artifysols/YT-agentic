@@ -114,6 +114,26 @@ async def test_auth_rate_limit(hub: Hub) -> None:
     assert codes[0] == 200 and codes[-1] == 429
 
 
+async def test_rotating_a_fake_session_cookie_does_not_bypass_the_auth_limit(hub: Hub) -> None:
+    async with hub.client() as c:
+        codes = []
+        for i in range(hub.settings.rate_auth_per_minute + 2):
+            c.cookies.set("hub_session", f"made-up-{i}")
+            res = await c.post("/api/auth/login/options", json={"username": "nobody"})
+            codes.append(res.status_code)
+    assert codes[-1] == 429
+
+
+def test_the_rate_limiter_keeps_bounded_memory() -> None:
+    from ytcore.approvals.service.security import RateLimiter
+
+    limiter = RateLimiter()
+    limiter.MAX_KEYS = 100  # type: ignore[misc]
+    for i in range(1000):
+        limiter.check(f"client-{i}", "auth", 10)
+    assert len(limiter._hits) <= 101
+
+
 async def test_strict_auth_limit_does_not_lock_out_signed_in_pages(hub: Hub) -> None:
     async with hub.client() as c:
         await hub.register(c, "nina", "approver")

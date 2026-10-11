@@ -22,7 +22,8 @@ render and QA; a HUMAN approval is mandatory before anything is published.
 - `ytcore/workflow` – states (source of truth), `VideoJobWorkflow`, activities (`Backend` protocol)
 - `ytcore/store/postgres.py` – psycopg 3 store; DB triggers enforce rules, errors become typed
   exceptions (`ytcore/store/errors.py`); every write sets `app.actor` for events/audit
-- `ytcore/gateway` – `PublishService` (only publish path, public key only), `FakeYouTubeClient`
+- `ytcore/gateway` – `PublishService` (only publish path, public key only); `server.py`/`main.py`
+  run it as its own service (`POST /v1/publish`), `remote.py` is the worker's client (ADR 0013); `FakeYouTubeClient`
   (default) and `RealYouTubeClient` (`youtube` extra; production only)
 - `ytcore/db/migrations` – numbered, immutable; `002_transitions_seed.sql` is generated and
   repeatable (`-- repeatable`)
@@ -58,6 +59,10 @@ render and QA; a HUMAN approval is mandatory before anything is published.
   deep review + spot checks; promotion = admin-confirmed recommendation (DB-enforced), demotion
   automatic on strike/rejection spike/policy flag. Tiers only choose the review lane: the gateway
   and token code never read them (tests enforce it)
+- `ytcore/ops/preflight.py` – `ytctl ops preflight`: read-only go/no-go before going live
+  (`docs/runbooks/go-live.md`)
+- Database roles (migration 014): `yt_hub`, `yt_worker`, `yt_gateway`, `yt_ops`, one login each;
+  only the hub can approve/sign off/release switches (tests run services with `-c role=...`)
 - `docs/runbooks` – kill switch, key rotation, stuck jobs, quota, strikes, suspension, restore
 - `tests/redteam` – adversarial suite (`make redteam`); must stay green
 - `ytctl` (`ytcore/cli.py`) – owner inputs and knowledge proposals

@@ -7,9 +7,12 @@ overlap.
 
 1. Pause publishing globally ([kill-switch.md](kill-switch.md)) if compromise is suspected;
    otherwise schedule a quiet window.
-2. Generate the new key in the KMS (production) or `python -m ytcore.approvals.service.cli
-   gen-dev-key` (dev only). Store the **private** key only where the hub reads it.
-3. Publish the new **public** key to the `approval-public-key` secret (a new version). Workers
+2. Production: create a NEW CryptoKeyVersion of the `approval-signing` key in Cloud KMS
+   (the private key never leaves KMS) and point `YT_HUB_KMS_KEY_RESOURCE` at it (Terraform
+   `container_platform`, `.../cryptoKeyVersions/<n>`). Dev only: `python -m
+   ytcore.approvals.service.cli gen-dev-key`.
+3. Publish the new **public** key (`gcloud kms keys versions get-public-key <n> ...`) to the
+   `approval-public-key` secret (a new version). Workers
    and the gateway read `latest` at start: restart them (`render-worker`, `gateway`).
 4. Restart the hub so it signs with the new key.
 5. Tokens signed by the old key stop verifying: any job in `scheduled`/`publishing` needs a fresh

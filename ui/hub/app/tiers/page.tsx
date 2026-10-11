@@ -1,130 +1,76 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { api, type TierChange, type TierReport, type TierRow } from "@/lib/api";
-import { useMe } from "@/lib/useMe";
-
-const pct = (r: number | null) => (r === null ? "-" : `${(r * 100).toFixed(0)}%`);
+import { useState } from "react";
+import { Badge, Button, Card, Notice, PageHead, SkeletonList, useToast } from "@/components/ui";
+import { api } from "@/lib/api";
+import { dateTime, pct } from "@/lib/format";
+import { useSession } from "@/lib/session";
+import { useApi } from "@/lib/useApi";
 
 export default function TiersPage() {
-  const me = useMe();
-  const [rows, setRows] = useState<TierRow[]>([]);
-  const [changes, setChanges] = useState<TierChange[]>([]);
-  const [report, setReport] = useState<TierReport | null>(null);
+  const { me } = useSession();
+  const toast = useToast();
+  const rows = useApi(() => api.tiers(), []);
+  const changes = useApi(() => api.tierChanges(), []);
+  const report = useApi(() => api.tierReport(), []);
   const [notes, setNotes] = useState<Record<number, string>>({});
-  const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const admin = me?.role === "admin";
 
-  const load = () =>
-    Promise.all([api.tiers(), api.tierChanges(), api.tierReport()])
-      .then(([r, c, d]) => {
-        setRows(r);
-        setChanges(c);
-        setReport(d);
-      })
-      .catch((e: Error) => setMessage({ kind: "err", text: e.message }));
-  useEffect(() => {
-    if (me) void load();
-  }, [me]);
-
-  if (!me) return null;
-  const admin = me.role === "admin";
   const decide = async (id: number, kind: "confirm" | "dismiss") => {
     try {
       const note = notes[id] ?? "";
       await (kind === "confirm" ? api.confirmTier(id, note) : api.dismissTier(id, note));
-      setMessage({ kind: "ok", text: kind === "confirm" ? "Channel promoted to the risk-based tier." : "Recommendation dismissed." });
-      await load();
+      toast("ok", kind === "confirm" ? "Channel promoted to the risk-based tier." : "Recommendation dismissed.");
+      await Promise.all([rows.reload(), changes.reload()]);
     } catch (e) {
-      setMessage({ kind: "err", text: (e as Error).message });
+      toast("err", (e as Error).message);
     }
   };
 
   return (
-    <>
-      <h1>Approval tiers</h1>
-      <p className="muted">
-        Tier 1 reviews every video one by one. Tier 2 sends low-risk videos to a one-tap fast lane (still one
-        approval per video) and the rest to deep review. A promotion is only ever a recommendation that an admin confirms;
-        a strike, a rejection spike or a policy flag returns the channel to tier 1 at once.
-      </p>
-      {message && <div className={`notice ${message.kind}`} role="status">{message.text}</div>}
-      <div className="card" style={{ padding: 0, overflowX: "auto" }}>
-        <table>
-          <thead><tr><th>Channel</th><th>Cluster</th><th>Tier</th><th>Since</th><th>Last change</th><th>Recommendation</th></tr></thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.channel_id} data-testid="tier-row">
-                <td className="mono">{r.channel_id}</td>
-                <td>{r.cluster_id ?? "-"}</td>
-                <td><span className={`badge ${r.tier === 2 ? "risk-mid" : ""}`}>tier {r.tier}</span></td>
-                <td className="mono">{new Date(r.tier_since).toLocaleDateString()}</td>
-                <td>{r.last_change_kind ? `${r.last_change_kind}: ${r.last_change_reason}` : "-"}</td>
-                <td>
-                  {r.recommendation_id !== null && (
-                    <div>
-                      <div className="mono muted">
-                        {Object.entries(r.recommendation_evidence ?? {})
-                          .filter(([k]) => k !== "rules")
-                          .map(([k, v]) => `${k}=${String(v)}`)
-                          .join(" ")}
-                      </div>
-                      {admin && (
-                        <div className="row">
-                          <input
-                            aria-label="decision note"
-                            placeholder="why (10+ characters)"
-                            value={notes[r.recommendation_id] ?? ""}
-                            onChange={(e) => setNotes({ ...notes, [r.recommendation_id as number]: e.target.value })}
-                          />
-                          <button onClick={() => decide(r.recommendation_id as number, "confirm")}>Promote to tier 2</button>
-                          <button onClick={() => decide(r.recommendation_id as number, "dismiss")}>Dismiss</button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <h2>Risk score vs human decisions</h2>
-      {report && (
-        <div className="card" data-testid="tier-report">
-          <p>
-            Spot checks: {report.spot_checks.n} reviewed, {report.spot_checks.disagreements} overruled
-            ({pct(report.spot_checks.rate)}). All low-risk videos: {report.low_risk_all.n} reviewed, {report.low_risk_all.disagreements} overruled
-            ({pct(report.low_risk_all.rate)}).
-          </p>
-          <table>
-            <thead><tr><th>Risk score</th><th>Reviewed</th><th>Rejected or edited</th></tr></thead>
-            <tbody>
-              {Object.entries(report.by_risk_bucket).map(([bucket, b]) => (
-                <tr key={bucket}><td className="mono">{bucket}</td><td>{b.n}</td><td>{b.not_approved}</td></tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+    <div className="stack">
+      <PageHead title="Review tiers" sub="Tier 1 reviews every video. Tier 2 adds a fast lane for low-risk videos (still one approval each). Promotion is a recommendation an admin confirms; any strike or rejection spike returns the channel to tier 1." />
+      {rows.error && <Notice tone="err">{rows.error}</Notice>}
+      {!rows.data && <SkeletonList />}
+      {rows.data?.map((r) => (
+        <Card key={r.channel_id} title={r.name || r.channel_id} action={<Badge tone={r.tier === 2 ? "info" : ""}>Tier {r.tier}</Badge>}>
+          <div data-testid="tier-row" className="stack">
+            <div className="faint small">{r.cluster_id ?? "no cluster"} · since {dateTime(r.tier_since)}{r.last_change_kind ? ` · ${r.last_change_kind}: ${r.last_change_reason}` : ""}</div>
+            {r.recommendation_id !== null && (
+              <div className="stack">
+                <Notice tone="info">Recommended for tier 2: {Object.entries(r.recommendation_evidence ?? {}).filter(([k]) => k !== "rules").map(([k, v]) => `${k.replace(/_/g, " ")} ${String(v)}`).join(" · ")}</Notice>
+                {admin && (
+                  <div className="row">
+                    <input className="input" style={{ flex: 1, minWidth: 180 }} aria-label="decision note" placeholder="Why (10+ characters)" value={notes[r.recommendation_id] ?? ""} onChange={(e) => setNotes({ ...notes, [r.recommendation_id as number]: e.target.value })} />
+                    <Button variant="primary" onClick={() => void decide(r.recommendation_id as number, "confirm")}>Promote (passkey)</Button>
+                    <Button onClick={() => void decide(r.recommendation_id as number, "dismiss")}>Dismiss</Button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </Card>
+      ))}
+      {report.data && (
+        <Card title="Risk score vs human decisions">
+          <div data-testid="tier-report" className="stack">
+            <div className="small">Spot checks: {report.data.spot_checks.n} reviewed, {report.data.spot_checks.disagreements} overruled ({pct(report.data.spot_checks.rate)}). All low-risk: {report.data.low_risk_all.n} reviewed, {report.data.low_risk_all.disagreements} overruled ({pct(report.data.low_risk_all.rate)}).</div>
+            <div className="table-wrap">
+              <table className="table"><thead><tr><th>Risk score</th><th>Reviewed</th><th>Rejected or edited</th></tr></thead>
+                <tbody>{Object.entries(report.data.by_risk_bucket).map(([b, v]) => <tr key={b}><td className="mono">{b}</td><td>{v.n}</td><td>{v.not_approved}</td></tr>)}</tbody></table>
+            </div>
+          </div>
+        </Card>
       )}
-
-      <h2>Tier decisions</h2>
-      <div className="card" style={{ padding: 0, overflowX: "auto" }}>
-        <table>
-          <thead><tr><th>When</th><th>Channel</th><th>Change</th><th>By</th><th>Reason</th></tr></thead>
-          <tbody>
-            {changes.map((c) => (
-              <tr key={c.id} data-testid="tier-change">
-                <td className="mono">{new Date(c.created_at).toLocaleString()}</td>
-                <td className="mono">{c.channel_id}</td>
-                <td>{c.kind} {c.from_tier} → {c.to_tier}</td>
-                <td className="mono">{c.actor}</td>
-                <td>{c.reason}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </>
+      <Card title="Tier decisions" pad={false}>
+        <div className="list">
+          {changes.data?.map((c) => (
+            <div key={c.id} className="item" data-testid="tier-change">
+              <div className="item-main"><div className="item-title">{c.channel_id}: {c.kind} {c.from_tier} → {c.to_tier}</div><div className="item-sub">{c.actor} · {dateTime(c.created_at)} · {c.reason}</div></div>
+            </div>
+          ))}
+        </div>
+      </Card>
+    </div>
   );
 }
