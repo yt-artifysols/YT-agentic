@@ -1,5 +1,6 @@
 // Typed client for the approval hub API (mirrors ytcore/approvals/service/openapi.json).
 import { startAuthentication } from "@simplewebauthn/browser";
+import { DEMO, demoRequest } from "./demo";
 
 export type Role = "approver" | "operator" | "admin";
 
@@ -144,6 +145,129 @@ export interface TierReport {
   by_risk_bucket: Record<string, { n: number; not_approved: number }>;
 }
 
+export interface Overview {
+  generated_at: string;
+  awaiting_approval: { count: number; oldest_deadline: string | null; due_within_2h: number };
+  in_production: number;
+  last_24h: { live: number; failed: number; cancelled: number; rejected: number };
+  kill_switch: { global_paused: boolean; paused_clusters: number; paused_channels: number };
+  cost_today_cents: number;
+  daily_budget_cents: number;
+  alerts_24h: number;
+  alerts: AlertRow[];
+  activity: { id: number; job_id: string; channel_id: string; from_state: string | null; to_state: string; actor: string; at: string; title: string }[];
+  clusters: { id: string; name: string; status: string; live_enabled: boolean; channels: number; awaiting_approval: number }[];
+  tiers: { pending_recommendations: number; demotions_7d: number };
+  channels: number;
+}
+
+export interface AlertRow {
+  id: number;
+  kind: string;
+  message: string;
+  channel_id: string | null;
+  cluster_id: string | null;
+  job_id?: string | null;
+  created_at: string;
+}
+
+export interface PipelineItem {
+  job_id: string;
+  channel_id: string;
+  cluster_id: string | null;
+  state: string;
+  origin: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  approval_deadline: string | null;
+  risk_score: number | null;
+  youtube_video_id: string | null;
+}
+
+export interface Pipeline {
+  items: PipelineItem[];
+  counts: Record<string, number>;
+}
+
+export interface TimelineEvent {
+  id: number;
+  from_state: string | null;
+  to_state: string;
+  actor: string;
+  at: string;
+  payload: Record<string, unknown>;
+}
+
+export interface ChannelRow {
+  id: string;
+  name: string;
+  cluster_id: string | null;
+  status: string;
+  autonomy: string;
+  approval_tier: number;
+  daily_budget_cents: number;
+  timezone: string;
+  awaiting_approval: number;
+  in_production: number;
+  published_7d: number;
+  next_slot: string | null;
+  approval_rate_30d: number | null;
+}
+
+export interface ChannelDetail extends ChannelRow {
+  knowledge: { kind: string; version: number; status: string; proposed_at: string | null }[];
+  recent_jobs: { job_id: string; state: string; title: string; updated_at: string }[];
+  strikes: { kind: string; note: string; created_at: string }[];
+  inputs_new: number;
+}
+
+export interface UserRow {
+  id: string;
+  username: string;
+  display_name: string;
+  role: Role;
+  disabled: boolean;
+  created_at: string;
+  passkeys: number;
+  last_used_at: string | null;
+}
+
+export interface KnowledgeDoc {
+  id: string;
+  channel_id: string;
+  kind: string;
+  version: number;
+  base_version: number | null;
+  status: string;
+  content_sha256: string;
+  proposed_by: string;
+  proposed_at: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+}
+
+export interface KnowledgeDraft extends KnowledgeDoc {
+  content: string;
+  base_content: string | null;
+  current_version: number | null;
+  stale: boolean;
+  diff: { op: string; text: string }[];
+}
+
+export interface OwnerInput {
+  id: string;
+  channel_id: string;
+  kind: string;
+  uri: string | null;
+  body: string | null;
+  sha256: string;
+  status: string;
+  submitted_by: string;
+  used_by_job: string | null;
+  created_at: string | null;
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -169,6 +293,7 @@ async function refreshCsrf(): Promise<void> {
 }
 
 async function request<T>(method: "GET" | "POST", path: string, body?: unknown, retry = true): Promise<T> {
+  if (DEMO) return (await demoRequest(method, path, body)) as T;
   const headers: Record<string, string> = { Accept: "application/json" };
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (method === "POST") {
@@ -196,7 +321,9 @@ async function request<T>(method: "GET" | "POST", path: string, body?: unknown, 
   return (await res.json()) as T;
 }
 
-type StepUpPurpose = "approve" | "batch" | "release" | "tier_confirm" | "rollout_enable";
+type StepUpPurpose =
+  | "approve" | "batch" | "release" | "tier_confirm" | "tier_dismiss" | "rollout_enable"
+  | "rollout_signoff" | "invite" | "knowledge";
 interface StepUpProof {
   ticket: string;
   credential: unknown;
@@ -250,8 +377,11 @@ export const api = {
     return request<Scorecard[]>("GET", `/api/scorecards${params.size ? `?${params}` : ""}`);
   },
   gate: (cluster: string) => request<Gate>("GET", `/api/rollout/${encodeURIComponent(cluster)}/gate`),
-  signoff: (cluster: string, note: string) =>
-    request<{ id: number }>("POST", `/api/rollout/${encodeURIComponent(cluster)}/signoff`, { note }),
+  signoff: async (cluster: string, note: string) =>
+    request<{ id: number }>("POST", `/api/rollout/${encodeURIComponent(cluster)}/signoff`, {
+      note,
+      stepup: await stepUp("rollout_signoff", [cluster]),
+    }),
   enableCluster: async (cluster: string) =>
     request<{ ok: boolean }>("POST", `/api/rollout/${encodeURIComponent(cluster)}/enable`, {
       stepup: await stepUp("rollout_enable", [cluster]),
@@ -267,10 +397,47 @@ export const api = {
       note,
       stepup: await stepUp("tier_confirm", [String(id)]),
     }),
-  dismissTier: (id: number, note: string) =>
-    request<{ ok: boolean }>("POST", `/api/tiers/recommendations/${id}/dismiss`, { note }),
+  dismissTier: async (id: number, note: string) =>
+    request<{ ok: boolean }>("POST", `/api/tiers/recommendations/${id}/dismiss`, {
+      note,
+      stepup: await stepUp("tier_dismiss", [String(id)]),
+    }),
   recordStrike: (channel: string, body: { kind: string; note: string; video_ref?: string }) =>
     request<{ id: number }>("POST", `/api/channels/${encodeURIComponent(channel)}/strikes`, body),
+
+  overview: () => request<Overview>("GET", "/api/overview"),
+  pipeline: (q: Record<string, string> = {}) => {
+    const params = new URLSearchParams(Object.entries(q).filter(([, v]) => v !== ""));
+    return request<Pipeline>("GET", `/api/pipeline${params.size ? `?${params}` : ""}`);
+  },
+  timeline: (id: string) => request<TimelineEvent[]>("GET", `/api/jobs/${encodeURIComponent(id)}/timeline`),
+  channels: () => request<ChannelRow[]>("GET", "/api/channels"),
+  channel: (id: string) => request<ChannelDetail>("GET", `/api/channels/${encodeURIComponent(id)}`),
+  alerts: () => request<AlertRow[]>("GET", "/api/alerts"),
+  users: () => request<UserRow[]>("GET", "/api/admin/users"),
+  invite: async (body: { username: string; display_name: string; role: Role }) =>
+    request<{ username: string; invite_token: string; expires_at: string }>("POST", "/api/admin/invites", {
+      ...body,
+      stepup: await stepUp("invite", [body.username, body.role]),
+    }),
+  drafts: (channel = "") => request<KnowledgeDoc[]>("GET", `/api/knowledge/drafts${channel ? `?channel=${encodeURIComponent(channel)}` : ""}`),
+  draft: (id: string) => request<KnowledgeDraft>("GET", `/api/knowledge/drafts/${encodeURIComponent(id)}`),
+  approveDraft: async (id: string, sha: string) =>
+    request<KnowledgeDoc>("POST", `/api/knowledge/drafts/${encodeURIComponent(id)}/approve`, {
+      content_sha256: sha,
+      stepup: await stepUp("knowledge", [id, "approve", sha]),
+    }),
+  rejectDraft: async (id: string, sha: string, reason: string) =>
+    request<KnowledgeDoc>("POST", `/api/knowledge/drafts/${encodeURIComponent(id)}/reject`, {
+      content_sha256: sha,
+      reason,
+      stepup: await stepUp("knowledge", [id, "reject", sha]),
+    }),
+  currentKnowledge: (channel: string) => request<KnowledgeDoc[]>("GET", `/api/channels/${encodeURIComponent(channel)}/knowledge`),
+  inputs: (channel: string, status = "") =>
+    request<OwnerInput[]>("GET", `/api/channels/${encodeURIComponent(channel)}/inputs${status ? `?status=${status}` : ""}`),
+  addInput: (channel: string, body: { kind: string; body?: string; uri?: string }) =>
+    request<OwnerInput>("POST", `/api/channels/${encodeURIComponent(channel)}/inputs`, body),
 
   controls: () => request<Controls>("GET", "/api/controls"),
   // Stopping is never blocked by the extra step; only RELEASING a switch needs the passkey.
