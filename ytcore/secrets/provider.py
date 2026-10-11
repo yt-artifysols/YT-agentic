@@ -11,6 +11,7 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 _REF_RE = re.compile(r"^(vault|env)://[A-Za-z0-9_./-]+(#[A-Za-z0-9_.-]+)?$")
 PRODUCTION = "production"
@@ -128,19 +129,54 @@ class InMemorySecretsProvider(SecretsProvider):
 
 
 class CloudSecretsManagerProvider(SecretsProvider):
-    """Stub for a cloud secrets manager (GCP Secret Manager / AWS Secrets Manager / Vault).
+    """GCP Secret Manager. Only vault:// references are accepted.
 
-    Wire a real client in a later phase. Only vault:// references are accepted.
+    `vault://database-url` reads the latest version of secret `database-url`; slashes in the path
+    become dashes (`vault://channels/chan-a/youtube` -> `channels-chan-a-youtube`); the optional
+    `#key` fragment selects a field when the secret holds a JSON object. The client is created
+    lazily (`gcp` extra) and can be injected in tests.
     """
 
     dev_only = False
 
-    def __init__(self, *, project: str) -> None:
+    def __init__(self, *, project: str, client: Any = None) -> None:
         if not project:
             raise SecretsError("cloud secrets manager needs a project/namespace")
         self._project = project
+        self._client = client
+
+    @staticmethod
+    def secret_id(ref: SecretRef) -> tuple[str, str | None]:
+        path, _, key = ref.path.partition("#")
+        name = re.sub(r"[^A-Za-z0-9_-]", "-", path.strip("/"))
+        if not name:
+            raise SecretsError("empty secret name")
+        return name, key or None
+
+    def _api(self) -> Any:
+        if self._client is None:  # pragma: no cover - needs real credentials
+            from google.cloud import secretmanager
+
+            self._client = secretmanager.SecretManagerServiceClient()
+        return self._client
 
     def get(self, ref: SecretRef) -> SecretValue:
         if ref.scheme != "vault":
             raise SecretsError("cloud secrets manager only resolves vault:// references")
-        raise NotImplementedError("cloud secrets manager client is not wired yet")
+        name, key = self.secret_id(ref)
+        try:
+            response = self._api().access_secret_version(
+                name=f"projects/{self._project}/secrets/{name}/versions/latest"
+            )
+        except Exception as exc:
+            # Never include the response or credentials in the error.
+            raise SecretsError(f"could not read secret {name!r}: {type(exc).__name__}") from None
+        value = response.payload.data.decode("utf-8")
+        if key is not None:
+            import json
+
+            try:
+                value = str(json.loads(value)[key])
+            except (ValueError, KeyError, TypeError):
+                raise SecretsError(f"secret {name!r} has no field {key!r}") from None
+        return SecretValue(value)

@@ -221,3 +221,41 @@ ON CONFLICT (channel_id, score_date) DO UPDATE SET jobs_planned = EXCLUDED.jobs_
   avg_retention = EXCLUDED.avg_retention, views = EXCLUDED.views,
   revenue_cents = EXCLUDED.revenue_cents, computed_at = now()
 """
+
+
+def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="python -m ytcore.analytics.ingest")
+    parser.add_argument("cmd", choices=["run-daily"])
+    parser.parse_args(argv)
+    from ytcore.analytics.client import FakeAnalyticsClient, RealYouTubeAnalyticsClient
+    from ytcore.config import build_secrets_provider, load_settings
+    from ytcore.safety.scrub import install_log_scrubber
+
+    install_log_scrubber()
+    settings = load_settings()
+    secrets = build_secrets_provider(settings)
+    dsn = secrets.get(SecretRef(settings.database_url_ref)).reveal()
+    if settings.youtube_backend == "real":
+        client: AnalyticsClient = RealYouTubeAnalyticsClient(
+            secrets.get(SecretRef("vault://youtube-oauth-client"))
+        )
+    else:
+        client = FakeAnalyticsClient()
+
+    def connect() -> psycopg.Connection[Any]:
+        return psycopg.connect(dsn, autocommit=True)
+
+    report = AnalyticsIngestor(connect, client, secrets, PostgresMemory(connect)).run_daily()
+    print(
+        f"ingested {report.ingested}, learned {report.learned}, scorecards {report.scorecards}, "
+        f"failed channels {sorted(report.failed_channels)}"
+    )
+    return 1 if report.failed_channels else 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    import sys
+
+    sys.exit(main())

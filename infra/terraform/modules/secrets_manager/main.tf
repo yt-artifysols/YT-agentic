@@ -18,6 +18,7 @@ locals {
     "approval-public-key",  # gateway and verifiers
     "anthropic-api-key",
     "youtube-oauth-client",
+    "database-url", # readable by every service that talks to Postgres
   ]
 }
 
@@ -40,6 +41,20 @@ resource "google_secret_manager_secret" "channel_refresh_token" {
   }
 }
 
+# Read-only analytics token per channel: SEPARATE from the upload token only the gateway reads.
+resource "google_secret_manager_secret" "channel_analytics_token" {
+  for_each  = toset(var.channel_ids)
+  project   = var.project_id
+  secret_id = "youtube-analytics-token-${each.value}"
+  labels    = { channel = each.value }
+  replication {
+    auto {}
+  }
+}
+
+output "analytics_secret_ids" {
+  value = { for k, s in google_secret_manager_secret.channel_analytics_token : k => s.id }
+}
 output "platform_secret_ids" {
   value = { for k, s in google_secret_manager_secret.platform : k => s.id }
 }

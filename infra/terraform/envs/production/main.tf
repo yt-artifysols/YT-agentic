@@ -12,6 +12,15 @@ variable "region" {
   type    = string
   default = "us-central1"
 }
+variable "temporal_address" {
+  type        = string
+  description = "Temporal frontend (Temporal Cloud or self-hosted), e.g. <ns>.<acct>.tmprl.cloud:7233."
+}
+variable "alert_email" { type = string }
+variable "render_workers" {
+  type    = number
+  default = 2
+}
 variable "channel_ids" {
   type    = list(string)
   default = []
@@ -52,6 +61,12 @@ module "object_storage" {
   bucket_name = "${var.project_id}-ytcore-assets-${local.env}"
 }
 
+module "backups" {
+  source      = "../../modules/backups"
+  project_id  = var.project_id
+  bucket_name = "${var.project_id}-ytcore-backups-${local.env}"
+}
+
 module "secrets" {
   source      = "../../modules/secrets_manager"
   project_id  = var.project_id
@@ -59,12 +74,26 @@ module "secrets" {
 }
 
 module "platform" {
-  source              = "../../modules/container_platform"
-  project_id          = var.project_id
-  region              = var.region
-  env                 = local.env
-  subnet_id           = module.network.subnet_id
-  images              = var.images
-  platform_secret_ids = module.secrets.platform_secret_ids
-  channel_secret_ids  = module.secrets.channel_secret_ids
+  source               = "../../modules/container_platform"
+  project_id           = var.project_id
+  region               = var.region
+  env                  = local.env
+  subnet_id            = module.network.subnet_id
+  images               = var.images
+  platform_secret_ids  = module.secrets.platform_secret_ids
+  channel_secret_ids   = module.secrets.channel_secret_ids
+  analytics_secret_ids = module.secrets.analytics_secret_ids
+  assets_bucket        = module.object_storage.bucket_name
+  backups_bucket       = module.backups.bucket_name
+  temporal_address     = var.temporal_address
+  temporal_namespace   = "ytcore-${local.env == "production" ? "prod" : "staging"}"
+  render_workers       = var.render_workers
+}
+
+module "monitoring" {
+  source      = "../../modules/monitoring"
+  project_id  = var.project_id
+  env         = local.env
+  alert_email = var.alert_email
+  job_names   = module.platform.job_names
 }

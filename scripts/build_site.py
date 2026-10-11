@@ -70,6 +70,15 @@ PHASES = [
         "detection, global/cluster/channel kill switches enforced in the DB and re-checked by the "
         "gateway, cluster circuit breaker, secret scrubbing, and a red-team suite.",
     ),
+    (
+        "Phase 4",
+        "Pilot readiness",
+        "done",
+        "Idempotent daily planner with slot rules and capped replans, per-job traces, metrics, "
+        "alerts and dashboards as code, analytics ingestion and scorecards, Terraform for "
+        "staging/production, runbooks, backups with a verified restore drill, chaos tests, and a "
+        "simulated week for three channels with no stuck jobs.",
+    ),
 ]
 
 INVARIANTS = [

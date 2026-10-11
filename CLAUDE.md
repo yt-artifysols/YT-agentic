@@ -45,6 +45,12 @@ render and QA; a HUMAN approval is mandatory before anything is published.
   prompt), asset limits, log/prompt secret scrubber (`scrub.py`), cluster circuit breaker
   (`breaker.py`, only ever pauses). Per-channel `SafetyPolicy` lives in the `policy` knowledge doc.
   Kill switches (global, cluster, channel) are DB-enforced (migration 008) and re-checked by the gateway.
+- `ytcore/planner/daily.py` – daily planner (idempotent plans, slot rules, replans);
+  `ytcore/workflow/worker.py` – worker + `plan-once` entry points (`build_stack` wires fakes or real)
+- `ytcore/observability` – traces per job (`tracing.py`), metrics, ops monitor, dashboards as code
+  (`python -m ytcore.observability.dashboards --check`); `ytcore/analytics` – metrics ingestion,
+  learnings, scorecards; `ytcore/ops` – backup/restore drill, upload reconciliation
+- `docs/runbooks` – kill switch, key rotation, stuck jobs, quota, strikes, suspension, restore
 - `tests/redteam` – adversarial suite (`make redteam`); must stay green
 - `ytctl` (`ytcore/cli.py`) – owner inputs and knowledge proposals
 - `tests/fakes.py` – `FakeBackend` mirroring DB rules; `tests/integration` – real Postgres
@@ -55,6 +61,7 @@ render and QA; a HUMAN approval is mandatory before anything is published.
 - `make up` then `make test-db` – migrations + `tests/schema_guard_test.sql` on real Postgres
 - `make test-integration` – pipeline + gateway against real Postgres (`REQUIRE_DB=1`)
 - `make evals` – agent evals vs committed baselines
+- `make restore-drill` – backup, restore into scratch DB, verify; `make check-observability`
 - `make redteam` – adversarial suite (forged/replayed/edited approvals, hostile assets, secrets)
 - `make test-all` – everything CI runs (except secret scan, audit, terraform)
 - `make tf-validate` – Terraform validation

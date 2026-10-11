@@ -70,9 +70,39 @@ def test_secret_ref_rejects_non_references(bad: str) -> None:
         SecretRef(bad)
 
 
-def test_cloud_stub_only_accepts_vault_refs() -> None:
-    p = CloudSecretsManagerProvider(project="yt-prod")
+class _FakeSecretManager:
+    def __init__(self, secrets: dict[str, str]) -> None:
+        self.secrets, self.asked = secrets, []
+
+    def access_secret_version(self, name: str) -> object:
+        self.asked.append(name)
+        sid = name.split("/secrets/")[1].split("/")[0]
+        if sid not in self.secrets:
+            raise LookupError("NOT_FOUND with secret detail")
+        data = self.secrets[sid].encode()
+        return type("R", (), {"payload": type("P", (), {"data": data})()})()
+
+
+def test_cloud_provider_only_accepts_vault_refs() -> None:
+    p = CloudSecretsManagerProvider(project="yt-prod", client=_FakeSecretManager({}))
     with pytest.raises(SecretsError):
         p.get(SecretRef("env://X"))
-    with pytest.raises(NotImplementedError):
-        p.get(SecretRef("vault://x#y"))
+
+
+def test_cloud_provider_reads_latest_version_and_json_fields() -> None:
+    fake = _FakeSecretManager(
+        {"database-url": "postgresql://h/db", "channels-a-youtube": '{"refresh_token": "rt"}'}
+    )
+    p = CloudSecretsManagerProvider(project="yt-prod", client=fake)
+    assert p.get(SecretRef("vault://database-url")).reveal() == "postgresql://h/db"
+    assert p.get(SecretRef("vault://channels/a/youtube#refresh_token")).reveal() == "rt"
+    assert fake.asked[0] == "projects/yt-prod/secrets/database-url/versions/latest"
+    with pytest.raises(SecretsError, match="no field"):
+        p.get(SecretRef("vault://channels/a/youtube#missing"))
+
+
+def test_cloud_provider_errors_never_echo_the_backend_message() -> None:
+    p = CloudSecretsManagerProvider(project="yt-prod", client=_FakeSecretManager({}))
+    with pytest.raises(SecretsError) as exc:
+        p.get(SecretRef("vault://nope"))
+    assert "secret detail" not in str(exc.value) and "LookupError" in str(exc.value)

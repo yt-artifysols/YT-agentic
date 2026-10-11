@@ -11,6 +11,7 @@ import subprocess
 import sys
 import uuid
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import psycopg
@@ -27,8 +28,9 @@ def _admin_conninfo() -> str:
     return f"dbname={os.environ.get('PGDATABASE', 'postgres')}"
 
 
-@pytest.fixture(scope="session")
-def database() -> Iterator[str]:
+@contextmanager
+def fresh_database() -> Iterator[str]:
+    """A new, fully migrated database; dropped afterwards."""
     try:
         admin = psycopg.connect(_admin_conninfo(), autocommit=True, connect_timeout=3)
     except psycopg.OperationalError as exc:
@@ -51,6 +53,12 @@ def database() -> Iterator[str]:
     finally:
         admin.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
         admin.close()
+
+
+@pytest.fixture(scope="session")
+def database() -> Iterator[str]:
+    with fresh_database() as conninfo:
+        yield conninfo
 
 
 @pytest.fixture

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -22,6 +22,7 @@ from temporalio.worker import Worker
 from tests.agentkit import BANNED, BRAND_VOICE, HOOKS, POLICY
 from tests.fakes import fake_secrets
 from tests.harness import Keys
+from tests.integration.conftest import fresh_database
 from ytcore.agents.fake import (
     FAKE_MUSIC_LICENSE,
     FAKE_STOCK_LICENSE,
@@ -61,6 +62,14 @@ ZONES = ["America/New_York", "Europe/Berlin", "Asia/Tokyo"]
 # (day index, channel index) -> what the humans do with that day's FIRST-attempt video
 MISSES = {(2, 1), (5, 2)}
 REJECTS = {(4, 0)}
+
+
+@pytest.fixture
+def database() -> Iterator[str]:
+    """This test gets its own database: the cross-channel duplicate index is global, so videos
+    from other tests' channels would (rightly) make the simulated channels' titles look reused."""
+    with fresh_database() as conninfo:
+        yield conninfo
 
 
 def staging_settings() -> Settings:

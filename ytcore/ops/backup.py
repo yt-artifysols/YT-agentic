@@ -278,16 +278,32 @@ def restore_drill(
     )
 
 
+def _upload(directory: Path, bucket: str) -> None:  # pragma: no cover - needs a real bucket
+    """Copy the backup files under backups/<UTC timestamp>/ in the backups bucket."""
+    from ytcore.gateway.assets import GcsAssetSource
+
+    target = GcsAssetSource(bucket)
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    for path in sorted(p for p in directory.rglob("*") if p.is_file()):
+        target.write_raw(
+            f"backups/{stamp}/{path.relative_to(directory).as_posix()}", path.read_bytes()
+        )
+    print(f"uploaded to gs://{bucket}/backups/{stamp}/")
+
+
 def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI
     parser = argparse.ArgumentParser(prog="python -m ytcore.ops.backup")
     parser.add_argument("cmd", choices=["backup", "restore-drill"])
     parser.add_argument("--dir", type=Path, required=True)
     parser.add_argument("--assets-dir", type=Path, help="local asset store to back up / verify")
+    parser.add_argument("--bucket", help="also upload the backup to this (backups) bucket")
     args = parser.parse_args(argv)
     conninfo = os.environ.get("BACKUP_CONNINFO", "")  # libpq env vars supply the credentials
     if args.cmd == "backup":
         manifest = backup_postgres(conninfo, args.dir)
         print(f"postgres backup ok: {manifest['dump_bytes']} bytes")
+        if args.bucket:
+            _upload(args.dir, args.bucket)
         if args.assets_dir:
             from ytcore.gateway.assets import LocalDirAssetSource
 

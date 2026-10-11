@@ -92,8 +92,11 @@ def test_only_the_gateway_touches_the_upload_api_and_it_never_holds_the_private_
                 names.append(node.module or "")
             for name in names:
                 in_gateway = rel.startswith("ytcore/gateway/")
-                if (name.startswith(("googleapiclient", "google.oauth2", "google_auth"))) and (
-                    not in_gateway
+                # The read-only analytics client is the one other place that may use Google's
+                # libraries; test_analytics_client_is_read_only pins what it may do.
+                allowed = in_gateway or rel == "ytcore/analytics/client.py"
+                if name.startswith(("googleapiclient", "google.oauth2", "google_auth")) and (
+                    not allowed
                 ):
                     offenders.append(f"{rel} imports {name}")
                 if name.endswith("RealYouTubeClient") and not in_gateway:
@@ -119,3 +122,16 @@ def test_signing_key_code_is_only_used_inside_the_approvals_package() -> None:
         text = path.read_text(encoding="utf-8")
         assert "ApprovalSigner" not in text, rel
         assert "approvals.keys" not in text, rel
+
+
+def test_analytics_client_is_read_only() -> None:
+    text = (ROOT / "ytcore" / "analytics" / "client.py").read_text(encoding="utf-8")
+    assert "yt-analytics.readonly" in text
+    for forbidden in (
+        "youtube.upload",
+        "youtube.force-ssl",
+        'auth/youtube"',
+        ".insert(",
+        "videos()",
+    ):
+        assert forbidden not in text, forbidden

@@ -40,7 +40,7 @@ changes.
 | 6 | **Insider misuse** | Named approvers recorded in tokens and audit events; hash-chained, append-only audit log with tamper detection; least-privilege IAM per service; production changes via reviewed PRs. |
 | 7 | **Supply-chain compromise** | Dependency audit (pip-audit) in CI; pinned, checksum-verified tool downloads; committed Terraform lock files; secret scan; minimal CI permissions (`contents: read`). |
 | 8 | **Log leakage** | A process-wide log scrubber (messages, args, tracebacks), prompt scrubbing of external content, intake rejection of credential-shaped owner inputs and knowledge, and a repo-wide secret-shape test; secrets referenced by `vault://` refs only; settings validation never echoes inputs (`hide_input_in_errors`); `SecretValue` redacts on str/repr; no prompts with secrets. |
-| 9 | **Provider outage** (YouTube, LLM, cloud) | Temporal durable retries and timers; jobs pause rather than fail open; missed approval deadlines cancel and re-plan; nothing auto-publishes when a dependency recovers. |
+| 9 | **Provider outage** (YouTube, LLM, cloud) | Temporal durable retries and timers; activity heartbeats detect dead workers in minutes; jobs pause rather than fail open; missed approval deadlines cancel and re-plan (daily planner, capped); an upload interrupted mid-flight is never retried automatically (operator adopts or releases it); chaos tests kill workers and restart Temporal and show no duplicate uploads; nothing auto-publishes when a dependency recovers. |
 | 10 | **Channel strike cascade** | Per-channel isolation (namespaces, tokens, budgets); per-channel and global kill switches; banned-claims policy and QA before approval; risk scoring, cross-channel duplicate detection and a cluster circuit breaker (rejection rate, policy flags, cost anomalies) that pauses a cluster and alerts operators; the global/cluster/channel kill switches are DB-enforced and re-checked by the gateway just before upload; strike signals pause the affected channel only. |
 
 ## Residual risks / follow-ups
@@ -59,3 +59,8 @@ changes.
 - Phase 3: the fingerprint index is a shared platform table; per-service DB roles are needed so
   only QA/safety code can read it.
 - Phase 3: the circuit breaker must be scheduled (cron/Temporal schedule); thresholds are defaults.
+- Phase 4: the cloud secrets provider reads Secret Manager with the service account's own
+  identity; per-service database roles are still missing (every service holds the same DSN).
+- Phase 4: analytics tokens are separate from upload tokens, but their consent screens must be
+  completed by each channel owner (manual step).
+- Phase 4: backups are as trustworthy as the last restore drill; schedule it monthly.

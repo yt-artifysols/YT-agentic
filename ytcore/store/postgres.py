@@ -82,12 +82,12 @@ def map_db_error(exc: psycopg.Error) -> StoreError:
 
 
 class PostgresStore:
-    def __init__(self, connect: Connect, verifier: ApprovalVerifier) -> None:
+    def __init__(self, connect: Connect, verifier: ApprovalVerifier | None) -> None:
         self._connect = connect
         self._verifier = verifier  # PUBLIC key only
 
     @classmethod
-    def from_conninfo(cls, conninfo: str, verifier: ApprovalVerifier) -> PostgresStore:
+    def from_conninfo(cls, conninfo: str, verifier: ApprovalVerifier | None) -> PostgresStore:
         return cls(lambda: psycopg.connect(conninfo, autocommit=True), verifier)
 
     @classmethod
@@ -98,6 +98,11 @@ class PostgresStore:
         return cls(lambda: psycopg.connect(dsn.reveal(), autocommit=True), verifier)
 
     # ------------------------------------------------------------------ plumbing
+
+    def _need_verifier(self) -> ApprovalVerifier:
+        if self._verifier is None:
+            raise StoreError("this store was opened without an approval public key")
+        return self._verifier
 
     @contextmanager
     def _tx(self, actor: str) -> Iterator[psycopg.Connection[Any]]:
@@ -178,7 +183,7 @@ class PostgresStore:
             if chash is None:
                 raise ApprovalGateError("job has no content to approve")
             try:
-                claims = self._verifier.verify(
+                claims = self._need_verifier().verify(
                     token, job_id=job_id, channel_id=channel_id, content_hash=chash
                 )
             except ApprovalError as exc:
@@ -223,7 +228,7 @@ class PostgresStore:
             if row is None or row[1] is None:
                 return None
             try:
-                claims = self._verifier.verify(
+                claims = self._need_verifier().verify(
                     token, job_id=job_id, channel_id=row[0], content_hash=row[1]
                 )
             except ApprovalError:
