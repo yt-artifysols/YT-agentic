@@ -102,6 +102,7 @@ def build_stack(
     providers: Providers | None = None,
     pool_poll_seconds: float = 1.0,
     gateway: Publisher | None = None,
+    hub_records_approvals: bool = False,
 ) -> Stack:
     dsn = conninfo or secrets.get(SecretRef(settings.database_url_ref)).reveal()
     verifier = verifier or load_verifier(settings, secrets)
@@ -137,7 +138,7 @@ def build_stack(
         replanner=lambda job, reason: plans.request_replan(job, reason),
         limiter=PoolLimiter(connect),
         pool_poll_seconds=pool_poll_seconds,
-        hub_records_approvals=separated,
+        hub_records_approvals=separated or hub_records_approvals,
     )
     state = PostgresClusterState(connect)
     cluster = ClusterActivities(state.limits, state.report)

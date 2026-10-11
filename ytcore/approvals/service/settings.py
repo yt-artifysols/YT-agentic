@@ -42,11 +42,15 @@ class HubSettings(BaseSettings):
     rate_write_per_minute: int = Field(default=60, ge=1)
     rate_read_per_minute: int = Field(default=300, ge=1)
 
-    key_backend: Literal["local_file", "kms"] = "local_file"
+    key_backend: Literal["local_file", "kms", "env"] = "local_file"
     key_file: Path = Path(".local/approval_ed25519.pem")
     kms_key_resource: str = ""
 
-    signaler_backend: Literal["fake", "temporal"] = "fake"
+    signaler_backend: Literal["fake", "temporal", "db"] = "fake"
+    # "db": ceremonies live in Postgres so any serverless instance can finish them (staging).
+    ceremony_backend: Literal["memory", "db"] = "memory"
+    # "db": assets in Postgres (staging); otherwise a bucket via the core settings.
+    asset_backend: Literal["default", "db"] = "default"
     temporal_address: str = "localhost:7233"
     temporal_namespace: str = "ytcore-dev"
 
@@ -74,8 +78,10 @@ class HubSettings(BaseSettings):
                 problems.append("require_stepup must be true")
             if self.key_backend != "kms":
                 problems.append("key_backend must be kms")
-            if self.signaler_backend == "fake":
+            if self.signaler_backend != "temporal":
                 problems.append("signaler_backend must be temporal")
+            if self.asset_backend == "db":
+                problems.append("asset_backend db is staging only")
             if self.notifier_backend == "fake":
                 problems.append("notifier_backend must not be fake")
             if problems:

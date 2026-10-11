@@ -112,6 +112,25 @@ class EnvFileSecretsProvider(SecretsProvider):
         return SecretValue(self._values[key])
 
 
+class EnvVarSecretsProvider(SecretsProvider):
+    """STAGING on platforms whose encrypted environment variables ARE the secret store (Vercel):
+    `env://NAME` and `vault://path#NAME` resolve to the process variable NAME. Never production."""
+
+    dev_only = True
+
+    def __init__(self, *, env: str | None = None) -> None:
+        for candidate in (env, os.environ.get("ENV")):
+            if candidate is not None and candidate.strip().lower() == PRODUCTION:
+                raise ProductionForbiddenError("EnvVarSecretsProvider refuses ENV=production")
+
+    def get(self, ref: SecretRef) -> SecretValue:
+        key = ref.path.split("#", 1)[1] if "#" in ref.path else ref.path
+        value = os.environ.get(key)
+        if not value:
+            raise SecretsError(f"secret not found for {ref.ref}")
+        return SecretValue(value)
+
+
 class InMemorySecretsProvider(SecretsProvider):
     """Fake for tests. Dev only."""
 

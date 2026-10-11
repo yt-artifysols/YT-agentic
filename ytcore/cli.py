@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -116,6 +117,9 @@ def _parser() -> argparse.ArgumentParser:
     grant = ops.add_parser("grant-role", help="make a database login a member of a service role")
     grant.add_argument("--role", required=True, choices=SERVICE_ROLES)
     grant.add_argument("--login", required=True)
+    ops.add_parser(
+        "seed-staging", help="register the fake providers' licences (staging only; admin DSN)"
+    )
     pre = ops.add_parser("preflight", help="read-only go-live checks (exit 1 on any failure)")
     pre.add_argument(
         "--check-secrets",
@@ -249,6 +253,21 @@ def _ops(args: argparse.Namespace, who: str) -> int:
         return psycopg.connect(dsn, autocommit=True)
 
     operator = who.removeprefix("cli:")
+    if args.cmd == "seed-staging":
+        from ytcore.agents.fake import FAKE_MUSIC_LICENSE, FAKE_STOCK_LICENSE
+
+        if os.environ.get("ENV", "").strip().lower() == "production":
+            print("refusing: fake-provider licences are for staging only", file=sys.stderr)
+            return 1
+        with connect() as conn:
+            for ref, kind in ((FAKE_MUSIC_LICENSE, "music"), (FAKE_STOCK_LICENSE, "stock")):
+                conn.execute(
+                    "INSERT INTO rights_register (license_ref, asset_kind, provider) "
+                    "VALUES (%s, %s, 'fake-stock') ON CONFLICT DO NOTHING",
+                    (ref, kind),
+                )
+        print("registered the fake providers' licences")
+        return 0
     if args.cmd == "grant-role":
         from psycopg import sql as pgsql
 

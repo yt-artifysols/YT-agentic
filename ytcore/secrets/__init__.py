@@ -1,6 +1,7 @@
 from ytcore.secrets.provider import (
     CloudSecretsManagerProvider,
     EnvFileSecretsProvider,
+    EnvVarSecretsProvider,
     InMemorySecretsProvider,
     ProductionForbiddenError,
     SecretRef,
@@ -12,6 +13,7 @@ from ytcore.secrets.provider import (
 __all__ = [
     "CloudSecretsManagerProvider",
     "EnvFileSecretsProvider",
+    "EnvVarSecretsProvider",
     "InMemorySecretsProvider",
     "ProductionForbiddenError",
     "SecretRef",

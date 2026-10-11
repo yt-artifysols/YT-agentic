@@ -21,6 +21,8 @@ setup:
 lock:
 	uv pip compile pyproject.toml --extra dev --extra hub --extra youtube --extra agents --extra gcp --extra gateway --extra otel --generate-hashes --python-version 3.12 -o requirements.lock
 	uv pip compile pyproject.toml --extra hub --extra youtube --extra agents --extra gcp --extra gateway --extra otel --generate-hashes --python-version 3.12 -o requirements-runtime.lock
+	uv pip compile pyproject.toml --extra hub --generate-hashes --python-version 3.12 -o deploy/vercel/hub-api/requirements.txt
+	cp deploy/vercel/hub-api/requirements.txt deploy/vercel/jobs/requirements.txt
 
 lint:
 	$(PY) -m ruff check .

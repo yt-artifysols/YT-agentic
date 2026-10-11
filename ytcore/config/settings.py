@@ -16,6 +16,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from ytcore.secrets.provider import (
     CloudSecretsManagerProvider,
     EnvFileSecretsProvider,
+    EnvVarSecretsProvider,
     InMemorySecretsProvider,
     SecretRef,
     SecretsError,
@@ -29,7 +30,7 @@ class Environment(StrEnum):
     PRODUCTION = "production"
 
 
-SecretsBackend = Literal["env_file", "in_memory", "cloud"]
+SecretsBackend = Literal["env_file", "in_memory", "cloud", "platform_env"]
 YouTubeBackend = Literal["fake", "real"]
 StorageBackend = Literal["memory", "local", "object_store"]
 LLMBackend = Literal["fake", "anthropic"]
@@ -39,7 +40,7 @@ QueueBackend = Literal["in_memory", "temporal"]
 
 # Values that are fakes or dev-only conveniences. Production refuses every one of them.
 FAKE_VALUES: dict[str, frozenset[str]] = {
-    "secrets_backend": frozenset({"env_file", "in_memory"}),
+    "secrets_backend": frozenset({"env_file", "in_memory", "platform_env"}),
     "youtube_backend": frozenset({"fake"}),
     "storage_backend": frozenset({"memory", "local"}),
     "llm_backend": frozenset({"fake"}),
@@ -142,8 +143,10 @@ class Settings(BaseSettings):
                     "https gateway_url and no static token"
                 )
         elif self.env is Environment.STAGING:
-            if self.secrets_backend in FAKE_VALUES["secrets_backend"]:
-                raise ConfigError("staging must use the cloud secrets manager")
+            if self.secrets_backend in {"env_file", "in_memory"}:
+                raise ConfigError(
+                    "staging must use the cloud secrets manager or the platform secret store"
+                )
             if self.temporal_namespace.endswith("prod"):
                 raise ConfigError("staging must not use a production temporal namespace")
         else:
@@ -164,6 +167,8 @@ def build_secrets_provider(settings: Settings) -> SecretsProvider:
         return CloudSecretsManagerProvider(project=settings.secrets_cloud_project)
     if settings.env is Environment.PRODUCTION:  # pragma: no cover - blocked by validation
         raise ConfigError("dev-only secrets provider in production")
+    if settings.secrets_backend == "platform_env":
+        return EnvVarSecretsProvider(env=settings.env.value)
     if settings.secrets_backend == "in_memory":
         return InMemorySecretsProvider()
     return EnvFileSecretsProvider(settings.secrets_env_file, env=settings.env.value)

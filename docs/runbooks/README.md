@@ -16,6 +16,7 @@ your own named account (the database records `operator:<name>`), never a shared 
 | Onboarding a channel, enabling the next cluster | [cluster-rollout.md](cluster-rollout.md) |
 | Promoting or demoting a channel's approval tier | [approval-tiers.md](approval-tiers.md) |
 | Restoring Postgres or storage from backup | [backup-restore.md](backup-restore.md) |
+| Setting up or debugging staging on Vercel | [vercel-staging.md](vercel-staging.md) |
 
 First look when paged: `ytctl ops stuck` (jobs, budgets, quota, failed uploads),
 `ytctl ops pending-uploads`, `ytctl ops plans`, and the hub's alerts page.
