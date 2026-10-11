@@ -203,7 +203,8 @@ class HubRepository:
             "SELECT j.id::text, j.channel_id, c.cluster_id, "
             "coalesce(j.manifest->'metadata'->>'title', ''), j.origin, j.content_hash, "
             "j.manifest_version, qa.risk_score, qa.passed, "
-            "coalesce(jsonb_array_length(qa.flags), 0), j.approval_deadline, c.approval_tier "
+            "coalesce(jsonb_array_length(qa.flags), 0), j.approval_deadline, c.approval_tier, "
+            "qa.content_hash "
             "FROM video_jobs j JOIN channels c ON c.id = j.channel_id "
             + self._LATEST_QA
             + " WHERE j.state = 'awaiting_approval'"
@@ -226,9 +227,11 @@ class HubRepository:
             percent = self._spot_percent(conn)
             items = []
             for r in rows:
+                stale = r[12] not in (None, r[5])  # the latest QA judged other content
                 lane = self._lane(
                     conn, job_id=r[0], channel_id=r[1], content_hash=r[5], tier=r[11],
-                    passed=r[8], risk=r[7], flags=r[9], percent=percent,
+                    passed=None if stale else r[8], risk=None if stale else r[7], flags=r[9],
+                    percent=percent,
                 )  # fmt: skip
                 items.append(
                     QueueItem(

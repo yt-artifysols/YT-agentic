@@ -236,6 +236,8 @@ async def test_spot_checks_send_low_risk_videos_to_deep_review_and_are_remembere
     hub.repo.tiers._rng = SeqRng(0.1, 0.9)  # first draw is a spot check, second is not
     checked, chash = hub.awaiting_job(ch, risk=5)
     passed, _ = hub.awaiting_job(ch, risk=5)
+    assert hub.repo.lane_for(checked).lane == "deep"  # type: ignore[union-attr]  # draw 1
+    assert hub.repo.lane_for(passed).lane == "fast"  # type: ignore[union-attr]  # draw 2
     lanes = {q.job_id: q for q in hub.repo.queue(channel=ch)}
     assert (lanes[checked].lane, lanes[passed].lane) == ("deep", "fast")
     assert "spot check" in lanes[checked].lane_reason
@@ -332,3 +334,50 @@ async def test_simulated_channels_promote_and_demote_correctly(
         )
         assert audited[0][0] == 2
     assert sql("SELECT audit_chain_first_break()")[0][0] is None
+
+
+def test_a_stale_recommendation_cannot_be_confirmed_after_a_strike(
+    hub: Hub, channel: Callable[..., str], sql: SQL
+) -> None:
+    ch = channel()
+    seed_history(hub, sql, ch)
+    (rec,) = [r for r in hub.repo.tiers.evaluate_promotions() if r.channel_id == ch]
+    hub.repo.tiers.record_strike(ch, "strike", "strike recorded after the recommendation",
+                                 video_ref=None, actor="operator:test")  # fmt: skip
+    status = sql("SELECT status FROM tier_recommendations WHERE id = %s", rec.id)[0][0]
+    assert status == "superseded"  # the strike withdrew it
+    with pytest.raises(LookupError):
+        hub.repo.tiers.confirm(rec.id, "tier-admin", "confirming a stale recommendation")
+    assert tier(sql, ch) == 1
+
+
+def test_confirming_rechecks_the_rules_on_todays_numbers(
+    hub: Hub, channel: Callable[..., str], sql: SQL
+) -> None:
+    ch = channel()
+    seed_history(hub, sql, ch)
+    (rec,) = [r for r in hub.repo.tiers.evaluate_promotions() if r.channel_id == ch]
+    seed_history(hub, sql, ch, decisions=10, days=1, rejected=8)  # a bad run since
+    with psycopg.connect(hub.conninfo, autocommit=True) as conn:
+        conn.execute("INSERT INTO hub_users (username, display_name, role) "
+                     "VALUES ('recheck-admin', 'A', 'admin') ON CONFLICT DO NOTHING")  # fmt: skip
+    from ytcore.store.errors import TierRefused
+
+    with pytest.raises(TierRefused, match="no longer eligible"):
+        hub.repo.tiers.confirm(rec.id, "recheck-admin", "confirming after a bad run")
+    assert tier(sql, ch) == 1
+
+
+def test_editing_a_video_does_not_re_roll_its_spot_check(
+    hub: Hub, channel: Callable[..., str], sql: SQL
+) -> None:
+    ch = channel()
+    hub.promote(ch)
+    sql("UPDATE tier_rules SET rules = %s", json.dumps({"spot_check_percent": 50}))
+    hub.repo.tiers._rng = SeqRng(0.1)  # drawn once: a spot check; a second draw would crash
+    job, _ = hub.awaiting_job(ch, risk=5)
+    assert hub.repo.lane_for(job).lane == "deep"  # type: ignore[union-attr]
+    with psycopg.connect(hub.conninfo, autocommit=True) as conn, conn.transaction():
+        conn.execute("SELECT set_config('app.actor', 'hub:reader', true)")
+        spot = hub.repo.tiers.spot_check(conn, job, "sha256:" + "d" * 64, ch, 50)  # edited content
+    assert spot is True

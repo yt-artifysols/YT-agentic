@@ -180,6 +180,13 @@ class ApprovalHub:
             await asyncio.to_thread(self._repo.tiers.demote_if_needed, lane.channel_id)
         except Exception as exc:
             log.error("could not record review outcome for %s: %s", lane.job_id, type(exc).__name__)
+            try:  # loud, so an operator re-checks the channel's tier by hand
+                await asyncio.to_thread(
+                    self._repo.audit, f"hub:{user.username}", "tier.outcome_failed",
+                    f"job:{lane.job_id}", {"decision": decision},
+                )  # fmt: skip
+            except Exception:
+                log.error("could not audit the failed outcome for %s", lane.job_id)
 
     async def edit(
         self, job_id: str, expected_hash: str, changes: dict[str, Any], user: User

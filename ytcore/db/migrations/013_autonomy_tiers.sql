@@ -82,8 +82,9 @@ BEGIN
         RAISE EXCEPTION 'tier recommendations are append-only' USING ERRCODE = 'YTT01';
     END IF;
     IF TG_OP = 'INSERT' THEN
-        IF NEW.status <> 'pending' THEN
-            RAISE EXCEPTION 'a recommendation starts pending' USING ERRCODE = 'YTT01';
+        IF NEW.status <> 'pending' OR app_actor() <> 'system:tiers' THEN
+            RAISE EXCEPTION 'only the tier evaluator creates (pending) recommendations'
+                USING ERRCODE = 'YTT01';
         END IF;
         PERFORM audit('tier.recommended', 'channel:' || NEW.channel_id, NEW.evidence);
         RETURN NEW;
@@ -94,6 +95,10 @@ BEGIN
         RAISE EXCEPTION 'a decided recommendation cannot change' USING ERRCODE = 'YTT01';
     END IF;
     IF NEW.status IN ('confirmed', 'dismissed') THEN
+        IF app_actor() <> 'hub:' || NEW.decided_by THEN
+            RAISE EXCEPTION 'a decision is made by the admin themself (actor %)', app_actor()
+                USING ERRCODE = 'YTT01';
+        END IF;
         IF NOT EXISTS (SELECT 1 FROM hub_users WHERE username = NEW.decided_by
                        AND role = 'admin' AND disabled_at IS NULL) THEN
             RAISE EXCEPTION 'only an active hub admin decides a tier recommendation (got %)',
@@ -131,9 +136,15 @@ BEGIN
         END IF;
         SELECT * INTO rec FROM tier_recommendations
          WHERE channel_id = NEW.id AND status = 'confirmed' AND decided_at = now()
+           AND app_actor() = 'hub:' || decided_by
          ORDER BY id DESC LIMIT 1;
         IF NOT FOUND THEN
             RAISE EXCEPTION 'promotion of % needs an admin-confirmed recommendation', NEW.id
+                USING ERRCODE = 'YTT01';
+        END IF;
+        IF EXISTS (SELECT 1 FROM channel_strikes s
+                   WHERE s.channel_id = NEW.id AND s.created_at >= rec.created_at) THEN
+            RAISE EXCEPTION 'a strike was recorded after the recommendation was made'
                 USING ERRCODE = 'YTT01';
         END IF;
         INSERT INTO tier_changes (channel_id, from_tier, to_tier, kind, reason, evidence,
@@ -173,6 +184,8 @@ BEGIN
     PERFORM set_config('app.tier_evidence',
                        jsonb_build_object('strike_id', NEW.id, 'kind', NEW.kind)::text, true);
     UPDATE channels SET approval_tier = 1 WHERE id = NEW.channel_id AND approval_tier = 2;
+    UPDATE tier_recommendations SET status = 'superseded'
+     WHERE channel_id = NEW.channel_id AND status = 'pending';
     PERFORM audit('tier.strike', 'channel:' || NEW.channel_id,
                   jsonb_build_object('strike_id', NEW.id, 'kind', NEW.kind));
     RETURN NULL;
@@ -180,6 +193,18 @@ END;
 $$;
 CREATE TRIGGER channel_strikes_demote AFTER INSERT ON channel_strikes
     FOR EACH ROW EXECUTE FUNCTION channel_strikes_demote();
+
+-- Channels always start on approve-all, however they are inserted.
+CREATE FUNCTION channels_tier_insert_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.approval_tier <> 1 THEN
+        RAISE EXCEPTION 'a channel starts on approve-all (tier 1)' USING ERRCODE = 'YTT01';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER channels_tier_insert_guard BEFORE INSERT ON channels
+    FOR EACH ROW EXECUTE FUNCTION channels_tier_insert_guard();
 
 -- Whether a given content version is a spot check is drawn once and stored.
 CREATE TABLE job_review_routing (
@@ -192,6 +217,17 @@ CREATE TABLE job_review_routing (
     PRIMARY KEY (job_id, content_hash),
     FOREIGN KEY (job_id, channel_id) REFERENCES video_jobs (id, channel_id)
 );
+-- Only the hub (or the tier evaluator) draws; agents and workers cannot pre-seed a draw.
+CREATE FUNCTION job_review_routing_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF app_actor() NOT LIKE 'hub:%' AND app_actor() <> 'system:tiers' THEN
+        RAISE EXCEPTION 'only the hub draws spot checks' USING ERRCODE = 'YTT01';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER job_review_routing_guard BEFORE INSERT ON job_review_routing
+    FOR EACH ROW EXECUTE FUNCTION job_review_routing_guard();
 CREATE TRIGGER job_review_routing_append_only BEFORE UPDATE OR DELETE ON job_review_routing
     FOR EACH ROW EXECUTE FUNCTION forbid_mutation();
 

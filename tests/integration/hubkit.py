@@ -52,13 +52,8 @@ class Hub:
                     "INSERT INTO hub_users (username, display_name, role) "
                     "VALUES ('tier-admin', 'Tier Admin', 'admin')"
                 )
-            rid = conn.execute(
-                "INSERT INTO tier_recommendations (channel_id, evidence) VALUES (%s, '{}') "
-                "RETURNING id",
-                (channel_id,),
-            ).fetchone()
-        assert rid is not None
-        self.repo.tiers.confirm(rid[0], "tier-admin", "promoted by the test fixture")
+        rec = self.repo.tiers.recommend(channel_id, {})
+        self.repo.tiers.confirm(rec.id, "tier-admin", "promoted by the test fixture", recheck=False)
 
     def client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(

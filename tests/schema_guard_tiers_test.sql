@@ -54,6 +54,7 @@ SELECT pg_temp.check((SELECT approval_tier FROM channels WHERE id = 't-a') = 1,
 SELECT pg_temp.expect_error(
     $$UPDATE channels SET approval_tier = 2 WHERE id = 't-a'$$, 'YTT01',
     'no promotion without a confirmed recommendation');
+SELECT set_config('app.actor', 'system:tiers', true);
 INSERT INTO tier_recommendations (channel_id, evidence) VALUES ('t-a', '{"days": 30}');
 SELECT pg_temp.expect_error(
     $$UPDATE channels SET approval_tier = 2 WHERE id = 't-a'$$, 'YTT01',
@@ -69,6 +70,7 @@ SELECT pg_temp.expect_error(
     $$INSERT INTO tier_changes (channel_id, from_tier, to_tier, kind, reason)
       VALUES ('t-a', 1, 2, 'promotion', 'forged history')$$, 'YTT01',
     'tier history cannot be written directly');
+SELECT set_config('app.actor', 'hub:boss', true);
 SELECT pg_temp.expect_ok(
     $$UPDATE tier_recommendations SET status = 'confirmed', decided_by = 'boss',
       note = 'reviewed the first month myself' WHERE channel_id = 't-a'$$,
@@ -84,7 +86,10 @@ SELECT pg_temp.expect_error(
     'a decided recommendation cannot change');
 SELECT pg_temp.expect_error($$DELETE FROM tier_recommendations$$, 'YTT01',
                             'recommendations cannot be deleted');
+SELECT set_config('app.actor', 'system:tiers', true);
 INSERT INTO tier_recommendations (channel_id, evidence) VALUES ('t-s', '{}');
+SELECT set_config('app.actor', 'hub:boss', true);
+
 UPDATE tier_recommendations SET status = 'confirmed', decided_by = 'boss',
        note = 'confirmed for the shadow test' WHERE channel_id = 't-s';
 SELECT pg_temp.expect_error(
@@ -92,6 +97,7 @@ SELECT pg_temp.expect_error(
     'a shadow channel cannot be promoted');
 
 -- ------------------------------------------------------------ demotion
+SELECT set_config('app.actor', 'system:tiers', true);
 INSERT INTO tier_recommendations (channel_id, evidence) VALUES ('t-a', '{}');
 SELECT pg_temp.expect_error(
     $$UPDATE channels SET approval_tier = 1 WHERE id = 't-a'$$, 'YTT01',
@@ -126,6 +132,37 @@ SELECT pg_temp.expect_error($$DELETE FROM review_outcomes$$, '42501',
 SELECT pg_temp.check((SELECT count(*) FROM audit_events
                       WHERE action IN ('tier.promoted', 'tier.demoted', 'tier.strike')) >= 3,
                      'every tier change is in the audit trail');
+-- ------------------------------------------------------------ forged paths
+SELECT pg_temp.expect_error(
+    $$INSERT INTO channels (id, display_name, storage_prefix, memory_namespace, approval_tier)
+      VALUES ('t-x', 'X', 'channels/t-x/', 'mem:t-x', 2)$$, 'YTT01',
+    'a channel cannot be inserted on tier 2');
+SELECT set_config('app.actor', 'agent:worker', true);
+SELECT pg_temp.expect_error(
+    $$INSERT INTO tier_recommendations (channel_id) VALUES ('t-a')$$, 'YTT01',
+    'only the evaluator creates recommendations');
+SELECT pg_temp.expect_error(
+    $$INSERT INTO job_review_routing (job_id, content_hash, channel_id, spot_check, percent)
+      VALUES ('00000000-0000-0000-0000-0000000000a1',
+              'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+              't-a', false, 10)$$, 'YTT01', 'a worker cannot pre-seed a spot-check draw');
+SELECT set_config('app.actor', 'system:tiers', true);
+INSERT INTO tier_recommendations (channel_id) VALUES ('t-a');
+SELECT set_config('app.actor', 'hub:appr', true);
+SELECT pg_temp.expect_error(
+    $$UPDATE tier_recommendations SET status = 'confirmed', decided_by = 'boss',
+      note = 'confirmed by someone else' WHERE channel_id = 't-a' AND status = 'pending'$$,
+    'YTT01', 'a confirmation must come from the admin it names');
+SELECT set_config('app.actor', 'hub:boss', true);
+UPDATE tier_recommendations SET status = 'confirmed', decided_by = 'boss',
+       note = 'confirmed before the strike' WHERE channel_id = 't-a' AND status = 'pending';
+SELECT set_config('app.actor', 'guard', true);
+INSERT INTO channel_strikes (channel_id, kind, note) VALUES ('t-a', 'warning', 'warning after the confirmation');
+SELECT set_config('app.actor', 'hub:boss', true);
+SELECT pg_temp.expect_error(
+    $$UPDATE channels SET approval_tier = 2 WHERE id = 't-a'$$, 'YTT01',
+    'a strike after the recommendation blocks the promotion');
+
 SELECT pg_temp.check(audit_chain_first_break() IS NULL, 'audit chain still verifies');
 
 ROLLBACK;

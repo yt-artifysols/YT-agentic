@@ -18,6 +18,7 @@ from typing import Any, Protocol
 import psycopg
 from psycopg.types.json import Jsonb
 
+from ytcore.store.errors import TierRefused
 from ytcore.store.postgres import Connect, map_db_error
 from ytcore.tiers.rules import ChannelStats, TierRules, assess_demotion, assess_promotion
 
@@ -83,9 +84,9 @@ class TierService:
                 (channel_id,),
             ).fetchone()  # type: ignore[misc]
             cost = conn.execute(
-                "SELECT sum(c.cost_cents)::float / nullif(count(DISTINCT o.job_id), 0) "
-                "FROM review_outcomes o JOIN job_costs c ON c.job_id = o.job_id "
-                "WHERE o.channel_id = %s",
+                "WITH jobs AS (SELECT DISTINCT job_id FROM review_outcomes WHERE channel_id = %s) "
+                "SELECT (SELECT sum(cost_cents) FROM job_costs WHERE job_id IN "
+                "(SELECT job_id FROM jobs))::float / nullif((SELECT count(*) FROM jobs), 0)",
                 (channel_id,),
             ).fetchone()
             strikes = conn.execute(
@@ -150,20 +151,23 @@ class TierService:
             if assess_promotion(stats, rules):
                 continue
             evidence = {**stats.evidence(), "rules": rules.promotion.model_dump(mode="json")}
-            with self._tx(HUB_SYSTEM) as conn:
-                row = conn.execute(
-                    "INSERT INTO tier_recommendations (channel_id, evidence) VALUES (%s, %s) "
-                    "RETURNING id, created_at",
-                    (channel_id, Jsonb(evidence)),
-                ).fetchone()
-                assert row is not None
-                conn.execute(
-                    "INSERT INTO alerts (channel_id, kind, message) VALUES (%s, %s, %s)",
-                    (channel_id, "tier.recommended",
-                     "channel earned a promotion recommendation; an admin must confirm it"),
-                )  # fmt: skip
-            made.append(Recommendation(row[0], channel_id, evidence, row[1]))
+            made.append(self.recommend(channel_id, evidence))
         return made
+
+    def recommend(self, channel_id: str, evidence: dict[str, Any]) -> Recommendation:
+        with self._tx(HUB_SYSTEM) as conn:
+            row = conn.execute(
+                "INSERT INTO tier_recommendations (channel_id, evidence) VALUES (%s, %s) "
+                "RETURNING id, created_at",
+                (channel_id, Jsonb(evidence)),
+            ).fetchone()
+            assert row is not None
+            conn.execute(
+                "INSERT INTO alerts (channel_id, kind, message) VALUES (%s, %s, %s)",
+                (channel_id, "tier.recommended",
+                 "channel earned a promotion recommendation; an admin must confirm it"),
+            )  # fmt: skip
+        return Recommendation(row[0], channel_id, evidence, row[1])
 
     def evaluate_demotions(self, *, now: datetime | None = None) -> list[Demotion]:
         """Return risky tier-2 channels to approve-all. Takes effect on queued jobs at once."""
@@ -214,8 +218,25 @@ class TierService:
 
     # ------------------------------------------------------------------ human decisions
 
-    def confirm(self, recommendation_id: int, admin: str, note: str) -> None:
-        """An admin confirms a recommendation; the promotion happens in the same transaction."""
+    def confirm(
+        self, recommendation_id: int, admin: str, note: str, *, recheck: bool = True
+    ) -> None:
+        """An admin confirms a recommendation; the promotion happens in the same transaction.
+        The rules are re-checked on today's numbers first (a strike or flag since the
+        recommendation blocks it). `recheck=False` is for test fixtures only."""
+        if recheck:
+            with self._tx(HUB_SYSTEM) as conn:
+                found = conn.execute(
+                    "SELECT channel_id FROM tier_recommendations WHERE id = %s "
+                    "AND status = 'pending'",
+                    (recommendation_id,),
+                ).fetchone()
+            if found is None:
+                raise LookupError("no pending recommendation with that id")
+            rules = self.rules()
+            problems = assess_promotion(self.stats(found[0], rules), rules)
+            if problems:
+                raise TierRefused("no longer eligible: " + "; ".join(problems))
         with self._tx(f"hub:{admin}") as conn:
             row = conn.execute(
                 "UPDATE tier_recommendations SET status = 'confirmed', decided_by = %s, "
@@ -275,7 +296,12 @@ class TierService:
         ).fetchone()
         if known is not None:
             return bool(known[0])
-        drawn = self._rng.random() * 100 < percent
+        earlier = conn.execute(
+            "SELECT spot_check FROM job_review_routing WHERE job_id = %s ORDER BY drawn_at LIMIT 1",
+            (job_id,),
+        ).fetchone()
+        # An edit gives new content a new hash but never a new draw (no re-rolling by editing).
+        drawn = bool(earlier[0]) if earlier else self._rng.random() * 100 < percent
         conn.execute(
             "INSERT INTO job_review_routing "
             "(job_id, content_hash, channel_id, spot_check, percent) "

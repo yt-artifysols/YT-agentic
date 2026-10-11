@@ -24,3 +24,10 @@ met again with a clean window.
 ## Spot-check disagreement is high
 `ytctl tier report [--channel C]`: if humans overrule low-risk videos often, lower
 `fast_lane_max_risk` (hub setting) or raise `spot_check_percent`, via a reviewed config change.
+
+## Known limits
+- Strikes are not read from YouTube: record every strike, warning or takedown within the hour
+  (see above). Until you do, the channel stays on its tier.
+- A rejection spike counts rejections only; heavy editing shows up in the disagreement report
+  and blocks promotion (edit rate), but does not demote by itself.
+- A failed outcome write is audited as `tier.outcome_failed`; run `ytctl tier evaluate`.
