@@ -8,7 +8,7 @@ export PGPORT ?= 5432
 export PGUSER ?= ytcore
 export PGPASSWORD ?= ytcore-dev
 
-.PHONY: setup lint format typecheck test test-db test-integration test-all check-generated check-migrations \
+.PHONY: scale-sim setup lint format typecheck test test-db test-integration test-all check-generated check-migrations \
         audit secrets-scan up down tf-validate site ui-check test-e2e hub evals redteam restore-drill check-observability
 
 setup:
@@ -42,6 +42,11 @@ test-db:
 # Pipeline + gateway against a real Postgres (throwaway database per run).
 test-integration:
 	REQUIRE_DB=1 $(PY) -m pytest -q -m integration
+
+# 20 channels x 7 simulated days with injected provider faults (writes docs/reports/scale-sim.json).
+scale-sim:
+	mkdir -p docs/reports
+	SCALE_REPORT=docs/reports/scale-sim.json REQUIRE_DB=1 $(PY) -m pytest -q tests/integration/test_scale_week.py
 
 # Agent regression evals vs ytcore/evals/baselines (fails on lower scores or unrecorded
 # prompt/model changes).

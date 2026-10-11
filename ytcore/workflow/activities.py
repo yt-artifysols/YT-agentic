@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
@@ -27,6 +28,7 @@ from ytcore.gateway.service import (
 )
 from ytcore.observability.metrics import observed
 from ytcore.scheduling.pools import PoolLimiter
+from ytcore.secrets.provider import SecretsError
 from ytcore.store.errors import (
     ApprovalGateError,
     ApprovalInvalid,
@@ -42,6 +44,7 @@ from ytcore.workflow.states import TERMINAL_STATES, JobState, can_transition
 
 ACTOR = "orchestrator"
 # Fake per-stage costs (cents) until real agents report their own.
+log = logging.getLogger(__name__)
 STAGE_COST_CENTS = {"render": 25}
 # Fair-share pools per stage; several pools are always taken in this order.
 STAGE_POOLS: dict[str, tuple[str, ...]] = {
@@ -318,9 +321,14 @@ class JobActivities:
             result = await asyncio.to_thread(self._publisher.publish, job_id, token)
         except UploadInProgress as exc:
             # Retryable: a later attempt sees the finished upload and returns it.
+            log.info("publish for job %s waits: %s", job_id, exc)
             raise ApplicationError(str(exc), type="UploadInProgress") from exc
-        except (PublishRefused, UploadFailed, QuotaExhausted, StoreError) as exc:
+        except (PublishRefused, UploadFailed, QuotaExhausted, StoreError, SecretsError) as exc:
+            log.warning("publish for job %s refused: %s: %s", job_id, type(exc).__name__, exc)
             raise _non_retryable(exc, type(exc).__name__) from exc
+        except Exception as exc:
+            log.warning("publish for job %s failed: %s", job_id, type(exc).__name__)
+            raise
         return PublishOutcome(result.video_id, result.state.value, result.duplicate)
 
     @activity.defn

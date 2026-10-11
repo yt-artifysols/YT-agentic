@@ -110,6 +110,7 @@ class VideoJobWorkflow:
         return VideoJobResult(job_id=inp.job_id, final_state=state.value, reason=reason, **kw)  # type: ignore[arg-type]
 
     async def _fail(self, inp: VideoJobInput, reason: str, **kw: object) -> VideoJobResult:
+        workflow.logger.warning("job %s failed: %s", inp.job_id, reason)
         final = await workflow.execute_activity_method(
             JobActivities.fail,
             args=[inp.job_id],
@@ -161,6 +162,16 @@ class VideoJobWorkflow:
             if report.rework_stage == JobState.SCRIPTING.value:
                 await self._to(inp, JobState.SCRIPTING)
                 self._artifacts.update(await self._stage(inp, "script"))
+
+    async def _tell_supervisor(self, inp: VideoJobInput) -> None:
+        """Production is done: free this job's production slot in its cluster supervisor."""
+        if inp.supervisor_id is None:
+            return
+        try:
+            handle = workflow.get_external_workflow_handle(inp.supervisor_id)
+            await handle.signal("produced", inp.job_id)
+        except Exception:  # noqa: S110 - the supervisor may be gone; the job does not depend on it
+            pass
 
     @staticmethod
     def _deadline(inp: VideoJobInput) -> datetime:
@@ -281,6 +292,7 @@ class VideoJobWorkflow:
                 retry_policy=_RETRY,
             )
             self._state = JobState.AWAITING_APPROVAL
+            await self._tell_supervisor(inp)
 
             approval = await self._await_approval(inp, chash)
             if isinstance(approval, _Rework):

@@ -79,6 +79,14 @@ PHASES = [
         "staging/production, runbooks, backups with a verified restore drill, chaos tests, and a "
         "simulated week for three channels with no stuck jobs.",
     ),
+    (
+        "Phase 5",
+        "Scale to 20 channels",
+        "done",
+        "Channels and clusters by YAML only, cluster supervisors, fair-share agent and GPU pools, "
+        "slot allocator, hub cluster and scorecard views, a DB-enforced rollout gate so cluster B "
+        "cannot go live before cluster A, and a 20-channel x 7-day fault-injected simulation.",
+    ),
 ]
 
 INVARIANTS = [

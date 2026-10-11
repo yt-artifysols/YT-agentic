@@ -64,6 +64,12 @@ class PostgresClusterState:
                     health.finished,
                     health.failed,
                     health.budget_held,
-                    Jsonb({"outcomes": health.outcomes, "paused": health.paused}),
+                    Jsonb(
+                        {
+                            "outcomes": health.outcomes,
+                            "paused": health.paused,
+                            "awaiting_human": health.awaiting_human,
+                        }
+                    ),
                 ),
             )

@@ -39,7 +39,7 @@ def subset(fleet: FleetCfg, slug: str) -> FleetCfg:
     while cur is not None:
         clusters[cur] = fleet.clusters[cur]
         cur = fleet.clusters[cur].requires_cluster
-    return FleetCfg(clusters=clusters, channels={slug: channel})
+    return FleetCfg(clusters=clusters, channels={slug: channel}, platform=fleet.platform)
 
 
 def _secret_present(secrets: SecretsProvider, ref: str) -> bool:

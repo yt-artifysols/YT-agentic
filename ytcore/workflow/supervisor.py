@@ -51,7 +51,8 @@ class ClusterLimits:
 class ClusterHealth:
     cluster_id: str
     pending: int = 0
-    running: int = 0
+    running: int = 0  # jobs in production (the cluster's concurrency cap applies to these)
+    awaiting_human: int = 0
     finished: int = 0
     failed: int = 0
     budget_held: bool = False
@@ -98,7 +99,8 @@ class ClusterSupervisorWorkflow:
     def __init__(self) -> None:
         self._pending: dict[str, JobSpec] = {}
         self._known: set[str] = set()
-        self._running = 0
+        self._producing: set[str] = set()  # started, not yet waiting for a human
+        self._running = 0  # started, not yet finished (producing + awaiting a human)
         self._started = 0
         self._outcomes: dict[str, int] = {}
         self._health = ClusterHealth("")
@@ -112,13 +114,21 @@ class ClusterSupervisorWorkflow:
             self._pending[spec.job_id] = spec
             self._dirty = True
 
+    @workflow.signal
+    def produced(self, job_id: str) -> None:
+        """A job finished production and now waits for a human: its slot is free again."""
+        if job_id in self._producing:
+            self._producing.discard(job_id)
+            self._dirty = True
+
     @workflow.query
     def health(self) -> ClusterHealth:
         return self._snapshot()
 
     def _snapshot(self) -> ClusterHealth:
         h = self._health
-        h.pending, h.running = len(self._pending), self._running
+        h.pending, h.running = len(self._pending), len(self._producing)
+        h.awaiting_human = self._running - len(self._producing)
         h.finished = sum(v for k, v in self._outcomes.items() if k == "live")
         h.failed = sum(v for k, v in self._outcomes.items() if k in ("failed", "error"))
         h.outcomes = dict(self._outcomes)
@@ -138,6 +148,7 @@ class ClusterSupervisorWorkflow:
             key = "error"
         self._outcomes[key] = self._outcomes.get(key, 0) + 1
         self._running -= 1
+        self._producing.discard(spec.job_id)
         self._dirty = True
 
     @workflow.run
@@ -154,7 +165,7 @@ class ClusterSupervisorWorkflow:
                     retry_policy=_RETRY,
                 )
             started_one = False
-            if limits and not limits.paused and self._running < limits.max_concurrent:
+            if limits and not limits.paused and len(self._producing) < limits.max_concurrent:
                 budget_ok = (
                     limits.budget_remaining_cents is None or limits.budget_remaining_cents > 0
                 )
@@ -173,11 +184,13 @@ class ClusterSupervisorWorkflow:
                             origin="planner",
                             approval_timeout_seconds=urgent.approval_timeout_seconds,
                             approval_deadline_epoch=urgent.approval_deadline_epoch,
+                            supervisor_id=workflow.info().workflow_id,
                         ),
                         id=workflow_id_for(urgent.job_id),
                         parent_close_policy=ParentClosePolicy.ABANDON,
                     )
                     self._running += 1
+                    self._producing.add(urgent.job_id)
                     self._started += 1
                     self._tasks.add(asyncio.ensure_future(self._run_child(urgent, handle)))
                     started_one = True

@@ -18,6 +18,9 @@ class VideoJobInput:
     # Absolute approval deadline (unix seconds) set by the planner: it does NOT move when
     # production takes longer than expected. None = now + approval_timeout_seconds at sealing.
     approval_deadline_epoch: float | None = None
+    # Set by a cluster supervisor: the job tells it when production is done (it then waits on a
+    # human, which must not occupy a production slot).
+    supervisor_id: str | None = None
     parent_job_id: str | None = None
 
 

@@ -50,6 +50,10 @@ render and QA; a HUMAN approval is mandatory before anything is published.
 - `ytcore/observability` – traces per job (`tracing.py`), metrics, ops monitor, dashboards as code
   (`python -m ytcore.observability.dashboards --check`); `ytcore/analytics` – metrics ingestion,
   learnings, scorecards; `ytcore/ops` – backup/restore drill, upload reconciliation
+- `ytcore/channels` – fleet YAML (`config/`) loader/apply/onboard + rollout gate (migration 011:
+  cluster B cannot be enabled before cluster A was live `gate_days` and an admin signed off);
+  `ytcore/scheduling` – pool leases (fair share, deadline priority); `ytcore/workflow/supervisor.py`
+  – per-cluster supervisor (caps jobs in production); adding a channel needs no code changes
 - `docs/runbooks` – kill switch, key rotation, stuck jobs, quota, strikes, suspension, restore
 - `tests/redteam` – adversarial suite (`make redteam`); must stay green
 - `ytctl` (`ytcore/cli.py`) – owner inputs and knowledge proposals
@@ -64,6 +68,7 @@ render and QA; a HUMAN approval is mandatory before anything is published.
 - `make restore-drill` – backup, restore into scratch DB, verify; `make check-observability`
 - `make redteam` – adversarial suite (forged/replayed/edited approvals, hostile assets, secrets)
 - `make test-all` – everything CI runs (except secret scan, audit, terraform)
+- `make scale-sim` – 20 channels x 7 days with injected provider faults
 - `make tf-validate` – Terraform validation
 
 ## Conventions

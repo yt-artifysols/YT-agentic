@@ -1,0 +1,12 @@
+# Fleet-wide limits and the service targets the 20-channel load simulation must meet.
+pools:
+  gpu_render: 4          # shared render queue across ALL clusters
+  research: 12
+  script_seo: 12
+  media: 8
+  qa: 12
+targets:
+  min_success_rate: 0.97
+  max_cost_per_video_cents: 100
+  max_approval_queue_depth: 25
+  max_sim_day_seconds: 120

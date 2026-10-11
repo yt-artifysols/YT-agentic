@@ -88,6 +88,7 @@ def build_stack(
     assets: ListableAssets | None = None,
     youtube: YouTubeClient | None = None,
     providers: Providers | None = None,
+    pool_poll_seconds: float = 1.0,
 ) -> Stack:
     dsn = conninfo or secrets.get(SecretRef(settings.database_url_ref)).reveal()
     verifier = verifier or load_verifier(settings, secrets)
@@ -116,6 +117,7 @@ def build_stack(
         pipeline,
         replanner=lambda job, reason: plans.request_replan(job, reason),
         limiter=PoolLimiter(connect),
+        pool_poll_seconds=pool_poll_seconds,
     )
     state = PostgresClusterState(connect)
     cluster = ClusterActivities(state.limits, state.report)

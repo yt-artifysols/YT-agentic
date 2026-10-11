@@ -166,9 +166,27 @@ class ChannelCfg(_Strict):
         return out
 
 
+class TargetsCfg(_Strict):
+    """Service targets the load simulation (and operators) hold the platform to."""
+
+    min_success_rate: float = Field(default=0.97, ge=0, le=1)
+    max_cost_per_video_cents: int = Field(default=100, ge=1)
+    max_approval_queue_depth: int = Field(default=25, ge=1)
+    max_sim_day_seconds: int = Field(default=120, ge=1)
+
+
+class PlatformCfg(_Strict):
+    # Global (fleet-wide) fair-share limits per shared pool, e.g. the GPU render queue.
+    pools: dict[Literal["research", "script_seo", "media", "gpu_render", "qa"], int] = Field(
+        default_factory=dict
+    )
+    targets: TargetsCfg = Field(default_factory=TargetsCfg)
+
+
 class FleetCfg(_Strict):
     clusters: dict[str, ClusterCfg]
     channels: dict[str, ChannelCfg]
+    platform: PlatformCfg = Field(default_factory=PlatformCfg)
 
     def project_of(self, channel: ChannelCfg) -> GoogleProjectCfg:
         cluster = self.clusters[channel.cluster]
@@ -268,7 +286,10 @@ def load_fleet(root: Path | None = None, *, max_channels: int = MAX_CHANNELS) ->
         if ch.slug in channels:
             raise ConfigError(f"duplicate channel {ch.slug}")
         channels[ch.slug] = ch
-    fleet = FleetCfg(clusters=clusters, channels=channels)
+    platform = PlatformCfg()
+    if (root / "platform.yaml").is_file():
+        platform = PlatformCfg.model_validate(_read(root / "platform.yaml"))
+    fleet = FleetCfg(clusters=clusters, channels=channels, platform=platform)
     validate_fleet(fleet, max_channels=max_channels)
     return fleet
 

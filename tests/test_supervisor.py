@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 
@@ -81,10 +82,25 @@ async def _until(cond, what: str, timeout: float = 20) -> None:  # type: ignore[
     raise AssertionError(f"timed out waiting for {what}")
 
 
-async def test_the_cluster_cap_holds_and_the_most_urgent_jobs_go_first(
+async def test_production_concurrency_is_capped_urgent_jobs_go_first_and_humans_do_not_hold_slots(
     env: WorkflowEnvironment,
 ) -> None:
     rig = Rig(max_concurrent=3)
+    gate = threading.Event()
+    state = {"now": 0, "max": 0}
+    lock = threading.Lock()
+    original = rig.backend.record_cost
+
+    def slow_cost(job_id: str, kind: str, cents: int, *, actor: str) -> None:
+        with lock:
+            state["now"] += 1
+            state["max"] = max(state["max"], state["now"])
+        gate.wait(timeout=20)
+        with lock:
+            state["now"] -= 1
+        original(job_id, kind, cents, actor=actor)
+
+    rig.backend.record_cost = slow_cost  # type: ignore[method-assign]
     async with rig.worker(env):
         sup = await env.client.start_workflow(
             ClusterSupervisorWorkflow.run,
@@ -98,21 +114,20 @@ async def test_the_cluster_cap_holds_and_the_most_urgent_jobs_go_first(
         await sup.signal(ClusterSupervisorWorkflow.enqueue, specs[0])  # duplicate: ignored
         by_urgency = [s.job_id for s in sorted(specs, key=lambda s: s.approval_deadline_epoch or 0)]
 
-        await _until(lambda: len(rig.awaiting()) == 3, "three jobs to start")
+        await _until(lambda: state["now"] == 3, "three jobs rendering")
         await asyncio.sleep(0.5)
-        assert rig.awaiting() == set(by_urgency[:3])  # deadlines 2h, 3h, 5h
         health = await sup.query(ClusterSupervisorWorkflow.health)
         assert (health.running, health.pending) == (3, 5)
-        assert all(r.state == JobState.PLANNED for j, r in rig.backend.jobs.items()
-                   if j in by_urgency[3:])  # fmt: skip
+        started = {j for j, r in rig.backend.jobs.items() if r.state != JobState.PLANNED}
+        assert started == set(by_urgency[:3])  # the 2h, 3h and 5h jobs
 
-        # Approving one frees a slot: the next most urgent job starts, never more than 3 at once.
-        await rig.approve(env, by_urgency[0])
-        await _until(lambda: by_urgency[3] in rig.awaiting(), "the next job to start")
-        assert len(rig.awaiting()) <= 3
+        gate.set()  # production finishes; jobs now wait for a human and free their slots
+        await _until(lambda: len(rig.awaiting()) == 8, "all eight jobs to reach approval")
+        assert state["max"] <= 3
+        health = await sup.query(ClusterSupervisorWorkflow.health)
+        assert health.awaiting_human == 8 and health.running == 0
 
-        for job in by_urgency[1:]:
-            await _until(lambda job=job: job in rig.awaiting(), f"{job} to wait for approval")
+        for job in by_urgency:
             await rig.approve(env, job)
         result: SupervisorResult = await asyncio.wait_for(sup.result(), 60)
     assert result.started == 8 and result.outcomes == {"live": 8}

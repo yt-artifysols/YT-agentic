@@ -12,6 +12,7 @@ your own named account (the database records `operator:<name>`), never a shared 
 | YouTube API quota exhausted or close to it | [quota-exhaustion.md](quota-exhaustion.md) |
 | A strike, a policy warning, a takedown | [strike-response.md](strike-response.md) |
 | A channel suspended or terminated | [channel-suspension-restore.md](channel-suspension-restore.md) |
+| Onboarding a channel, enabling the next cluster | [cluster-rollout.md](cluster-rollout.md) |
 | Restoring Postgres or storage from backup | [backup-restore.md](backup-restore.md) |
 
 First look when paged: `ytctl ops stuck` (jobs, budgets, quota, failed uploads),

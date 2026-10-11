@@ -87,6 +87,7 @@ def _apply_sql(conn: psycopg.Connection[Any], fleet: FleetCfg, report: ApplyRepo
             )
             report.projects[p.id] = _state(before, (p.daily_quota_units, p.oauth_client_ref))
     # Clusters in dependency order, so a required cluster exists first.
+    report.pools += _pools(conn, "global", "", {str(k): v for k, v in fleet.platform.pools.items()})
     for cluster in _in_order(fleet.clusters):
         _cluster(conn, cluster, report)
     for ch in fleet.channels.values():
