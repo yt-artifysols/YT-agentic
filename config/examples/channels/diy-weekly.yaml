@@ -1,0 +1,13 @@
+slug: diy-weekly
+display_name: DIY Weekly
+cluster: cluster-b
+audience_timezone: Europe/Berlin
+publish:
+  hour_local: 18
+  window_minutes: 90
+brand:
+  brand_voice: |
+    Practical, safety-first, friendly.
+policy:
+  production:
+    min_sources: 1

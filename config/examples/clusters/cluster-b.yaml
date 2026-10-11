@@ -1,0 +1,11 @@
+id: cluster-b
+display_name: Home and DIY (cluster B)
+niche: home improvement
+requires_cluster: cluster-a   # dark until cluster-a ran live 14 days and an admin signed it off
+live: false
+gate_days: 14
+google_projects:
+  - id: ytcore-cluster-b-1
+    daily_quota_units: 10000
+pools:
+  gpu_render: 1

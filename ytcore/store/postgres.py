@@ -37,6 +37,7 @@ from ytcore.store.errors import (
     KnowledgeStale,
     LicenseInvalid,
     QuotaExhausted,
+    RolloutRefused,
     StoreError,
     UploadGuardError,
 )
@@ -54,6 +55,7 @@ _BY_SQLSTATE: dict[str, type[StoreError]] = {
     "YTC01": ChannelNotPublishable,
     "YTU01": UploadGuardError,
     "YTD01": ApprovalGateError,
+    "YTR01": RolloutRefused,
 }
 _BY_MESSAGE: tuple[tuple[str, str, type[StoreError]], ...] = (
     ("23514", "illegal job transition", IllegalTransition),

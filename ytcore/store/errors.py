@@ -65,3 +65,7 @@ class LicenseInvalid(StoreError):
 
 class InputRejected(StoreError):
     """An owner input violates a rule (duplicate, immutable, wrong channel, archived)."""
+
+
+class RolloutRefused(StoreError):
+    """A cluster cannot go live yet (prerequisite not met, or no human sign-off)."""

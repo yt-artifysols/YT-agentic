@@ -1,0 +1,30 @@
+slug: finance-daily
+display_name: Finance Daily
+cluster: cluster-a
+autonomy_tier: shadow            # becomes gated only after the shadow dry run is reviewed
+audience_timezone: America/New_York
+publish:
+  hour_local: 17
+  window_minutes: 120            # slots are spread across 17:00-19:00 local, varying by day
+  approval_lead_minutes: 60
+budget:
+  job_cents: 300
+  daily_cents: 1500
+brand:
+  brand_voice: |
+    Calm, precise and friendly. Plain words, no hype.
+  hook_library: |
+    Most people get {topic} wrong.
+    Here is what the evidence says about {topic}.
+  banned_claims: |
+    guaranteed returns
+    risk-free
+policy:
+  production:
+    min_sources: 2
+    tone_words: [evidence, plain]
+    forbidden_words: [hype]
+  safety:
+    banned_topics: [stock tips]
+    sensitive:
+      finance: escalate

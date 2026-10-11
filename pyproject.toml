@@ -14,6 +14,7 @@ dependencies = [
   "pydantic-settings>=2.4",
   "temporalio>=1.8",
   "opentelemetry-api>=1.27",
+  "pyyaml>=6",
 ]
 
 [project.scripts]
@@ -74,7 +75,7 @@ packages = ["ytcore"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["googleapiclient.*", "google.oauth2.*", "google.cloud.*", "opentelemetry.exporter.*"]
+module = ["yaml", "googleapiclient.*", "google.oauth2.*", "google.cloud.*", "opentelemetry.exporter.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
