@@ -15,6 +15,9 @@ key in an encrypted variable. Production keeps Temporal, KMS and the separate ga
 Only the hub project can sign or record an approval; the jobs project cannot (database roles).
 
 ## 1. Setup order
+Created so far for this repo: projects `yt-agentic-hub-api`, `yt-agentic-jobs`, `yt-agentic-hub-ui`
+(root directory and no build/install/output overrides; the repository-root `vercel.json` belongs to
+the static site project only).
 1. Create the three projects (roots in the table above) and add **Neon Postgres** from the Vercel
    Marketplace (Storage). The integration injects the OWNER connection into the project it is
    linked to: unlink the Neon resource from `yt-agentic-hub-api` and `yt-agentic-jobs` (the
