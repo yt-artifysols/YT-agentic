@@ -3,7 +3,7 @@
 KeyProvider hides where the Ed25519 private key lives:
 - LocalFileKeyProvider: a PEM file on disk, dev only (refuses ENV=production).
 - KmsKeyProvider: interface for a cloud KMS asymmetric key (sign happens inside the KMS, the
-  private key never leaves it). Not wired yet.
+  private key never leaves it); the client is injectable for tests.
 
 The gateway, workers and agents only ever receive the PUBLIC key (ApprovalVerifier).
 """
@@ -75,20 +75,53 @@ class LocalFileKeyProvider:
         return self._key.public_key()
 
 
+class KmsClient(Protocol):
+    """The two Cloud KMS calls we need. Signing happens inside the KMS."""
+
+    def sign(self, key_version: str, data: bytes) -> bytes: ...
+
+    def public_key_pem(self, key_version: str) -> str: ...
+
+
+class GoogleKmsClient:  # pragma: no cover - needs Cloud KMS (`gcp` extra)
+    def __init__(self) -> None:
+        from google.cloud import kms
+
+        self._client = kms.KeyManagementServiceClient()
+
+    def sign(self, key_version: str, data: bytes) -> bytes:
+        # Ed25519 signs the message itself (not a digest).
+        return bytes(
+            self._client.asymmetric_sign(request={"name": key_version, "data": data}).signature
+        )
+
+    def public_key_pem(self, key_version: str) -> str:
+        return str(self._client.get_public_key(request={"name": key_version}).pem)
+
+
 class KmsKeyProvider:
-    """Production: asymmetric Ed25519 key held in a cloud KMS, referenced by resource name.
+    """Production: an Ed25519 key held in Cloud KMS (EC_SIGN_ED25519), referenced by the full
+    CryptoKeyVersion resource name. Signing happens remotely; the private key never enters this
+    process, and the public key is fetched once and cached."""
 
-    Wire a KMS client (e.g. Cloud KMS asymmetricSign) in a later phase. The interface is final:
-    signing happens remotely; the private key never enters this process.
-    """
-
-    def __init__(self, *, key_resource: str) -> None:
+    def __init__(self, *, key_resource: str, client: KmsClient | None = None) -> None:
         if not key_resource:
             raise ValueError("KMS key resource name is required")
+        if "/cryptoKeyVersions/" not in key_resource:
+            raise ValueError("KMS key resource must name a CryptoKeyVersion")
         self._key_resource = key_resource
+        self._client = client or GoogleKmsClient()
+        self._public: Ed25519PublicKey | None = None
 
     def sign(self, data: bytes) -> bytes:
-        raise NotImplementedError("KMS signing is not wired yet")
+        return self._client.sign(self._key_resource, data)
 
     def public_key(self) -> Ed25519PublicKey:
-        raise NotImplementedError("KMS public key fetch is not wired yet")
+        if self._public is None:
+            key = serialization.load_pem_public_key(
+                self._client.public_key_pem(self._key_resource).encode()
+            )
+            if not isinstance(key, Ed25519PublicKey):
+                raise ValueError("the KMS key is not an Ed25519 key")
+            self._public = key
+        return self._public

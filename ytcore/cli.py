@@ -110,7 +110,13 @@ def _parser() -> argparse.ArgumentParser:
     ops = sub.add_parser("ops", help="operations (see docs/runbooks)").add_subparsers(
         dest="cmd", required=True
     )
-    ops.add_parser("preflight", help="read-only go-live checks (exit 1 on any failure)")
+    pre = ops.add_parser("preflight", help="read-only go-live checks (exit 1 on any failure)")
+    pre.add_argument(
+        "--check-secrets",
+        action="store_true",
+        help="also resolve each channel's credentials (needs gateway-level secret access; "
+        "run it as the gateway identity, never from a laptop)",
+    )
     ops.add_parser("stuck", help="jobs, budgets, quota and uploads that need attention")
     ops.add_parser("pending-uploads", help="uploads left pending by a crash")
     adopt = ops.add_parser("adopt-upload", help="the video exists on YouTube: record it")
@@ -241,7 +247,8 @@ def _ops(args: argparse.Namespace, who: str) -> int:
         from ytcore.config import build_secrets_provider, load_settings
         from ytcore.ops import preflight
 
-        checks = preflight.run(connect, secrets=build_secrets_provider(load_settings()))
+        secrets = build_secrets_provider(load_settings()) if args.check_secrets else None
+        checks = preflight.run(connect, secrets=secrets)
         print(preflight.render(checks))
         return 0 if preflight.go(checks) else 1
     if args.cmd == "stuck":

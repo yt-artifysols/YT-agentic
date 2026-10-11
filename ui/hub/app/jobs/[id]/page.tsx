@@ -81,6 +81,9 @@ export default function JobPage() {
   );
 
   const canDecide = me?.role === "approver" && job?.state === "awaiting_approval";
+  // Approving needs a deliberate act: the reviewer confirms they looked at THIS version.
+  const [reviewed, setReviewed] = useState(false);
+  useEffect(() => setReviewed(false), [job?.content_hash]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -91,8 +94,8 @@ export default function JobPage() {
         return;
       }
       if (typing || !canDecide || !job || busy) return;
-      if (e.key === "a") void act(() => api.approve(job.job_id, job.content_hash), "approved");
-      else if (e.key === "e") setMode("edit");
+      // No one-key approve: approval is a button behind the "I reviewed this" confirmation.
+      if (e.key === "e") setMode("edit");
       else if (e.key === "r") setMode("reject");
     }
     window.addEventListener("keydown", onKey);
@@ -122,9 +125,14 @@ export default function JobPage() {
 
       {canDecide && (
         <div className="card row" style={{ marginBottom: 16 }}>
-          <button className="primary" disabled={busy} data-testid="approve"
+          <label>
+            <input type="checkbox" data-testid="reviewed" checked={reviewed}
+              onChange={(e) => setReviewed(e.target.checked)} />{" "}
+            I reviewed the video, thumbnail, script and flags of this version
+          </label>
+          <button className="primary" disabled={busy || !reviewed} data-testid="approve"
             onClick={() => void act(() => api.approve(job.job_id, job.content_hash), "approved")}>
-            Approve <span className="kbd">a</span>
+            Approve
           </button>
           <button disabled={busy} onClick={() => setMode("edit")} data-testid="edit">Edit <span className="kbd">e</span></button>
           <button className="danger" disabled={busy} onClick={() => setMode("reject")} data-testid="reject">

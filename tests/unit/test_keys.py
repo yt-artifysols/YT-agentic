@@ -53,7 +53,61 @@ def test_dev_key_providers_refuse_production(
         InMemoryKeyProvider()
 
 
-def test_kms_provider_is_an_interface_until_wired() -> None:
-    kms = KmsKeyProvider(key_resource="projects/p/locations/l/keyRings/r/cryptoKeys/k")
-    with pytest.raises(NotImplementedError):
-        kms.sign(b"x")
+class FakeKms:
+    """Stands in for Cloud KMS: holds the private key, exposes sign and the public PEM only."""
+
+    def __init__(self) -> None:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+        self._key = Ed25519PrivateKey.generate()
+        self.signed = 0
+
+    def sign(self, key_version: str, data: bytes) -> bytes:
+        self.signed += 1
+        return self._key.sign(data)
+
+    def public_key_pem(self, key_version: str) -> str:
+        from cryptography.hazmat.primitives import serialization
+
+        return (
+            self._key.public_key()
+            .public_bytes(
+                serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+            )
+            .decode()
+        )
+
+
+VERSION = "projects/p/locations/l/keyRings/r/cryptoKeys/k/cryptoKeyVersions/1"
+
+
+def test_kms_provider_signs_remotely_and_verifies_with_the_public_key_only() -> None:
+    kms = KmsKeyProvider(key_resource=VERSION, client=FakeKms())
+    signature = kms.sign(b"approval")
+    kms.public_key().verify(signature, b"approval")
+    with pytest.raises(Exception):  # noqa: B017 - any verification failure
+        kms.public_key().verify(signature, b"tampered")
+    assert not hasattr(kms, "_key")  # no private key material in this process
+
+
+def test_kms_provider_needs_a_key_version_and_an_ed25519_key() -> None:
+    with pytest.raises(ValueError, match="CryptoKeyVersion"):
+        KmsKeyProvider(key_resource="projects/p/locations/l/keyRings/r/cryptoKeys/k",
+                       client=FakeKms())  # fmt: skip
+
+    class RsaKms(FakeKms):
+        def public_key_pem(self, key_version: str) -> str:
+            from cryptography.hazmat.primitives import serialization
+            from cryptography.hazmat.primitives.asymmetric import rsa
+
+            key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+            return (
+                key.public_key()
+                .public_bytes(
+                    serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+                )
+                .decode()
+            )
+
+    with pytest.raises(ValueError, match="Ed25519"):
+        KmsKeyProvider(key_resource=VERSION, client=RsaKms()).public_key()

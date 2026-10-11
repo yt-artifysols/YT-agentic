@@ -25,7 +25,8 @@ switch ([kill-switch.md](kill-switch.md)). Do the steps in order; stop at the fi
       `autonomy_tier: gated` through a reviewed PR. New channels stay on approve-all (tier 1).
 
 ## 3. Preflight (read-only, safe any time)
-`ytctl ops preflight` must exit 0: migrations applied, audit chain intact, every gated channel
+`ytctl ops preflight` must exit 0 (add `--check-secrets` only when running as the gateway
+identity: it resolves each channel's upload credential without printing it): migrations applied, audit chain intact, every gated channel
 has credentials that resolve, an approved brand/policy/banned-claims set, a budget and an
 enabled cluster, no stuck jobs or alerts, no uploads left pending. Warnings (kill switch
 engaged, scoped pauses) are expected at this point.

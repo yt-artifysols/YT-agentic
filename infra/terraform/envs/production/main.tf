@@ -17,6 +17,14 @@ variable "temporal_address" {
   description = "Temporal frontend (Temporal Cloud or self-hosted), e.g. <ns>.<acct>.tmprl.cloud:7233."
 }
 variable "alert_email" { type = string }
+variable "hub_origin" {
+  type        = string
+  description = "Public https origin of the approval hub UI."
+}
+variable "hub_rp_id" {
+  type        = string
+  description = "WebAuthn relying party id (the hub host or a parent domain)."
+}
 variable "render_workers" {
   type    = number
   default = 2
@@ -88,6 +96,8 @@ module "platform" {
   temporal_address     = var.temporal_address
   temporal_namespace   = "ytcore-${local.env == "production" ? "prod" : "staging"}"
   render_workers       = var.render_workers
+  hub_origin           = var.hub_origin
+  hub_rp_id            = var.hub_rp_id
 }
 
 module "monitoring" {

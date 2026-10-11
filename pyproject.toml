@@ -37,6 +37,7 @@ otel = [
 gcp = [
   "google-cloud-storage>=2.18",
   "google-cloud-secret-manager>=2.20",
+  "google-cloud-kms>=2.24",
 ]
 youtube = [
   "google-api-python-client>=2.140",

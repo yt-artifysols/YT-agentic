@@ -91,7 +91,7 @@ def create_hub_app(
         settings=settings,
         repo=repo,
         hub=hub,
-        assets=assets or InMemoryAssetSource(),
+        assets=resolve_assets(settings, assets),
         sessions=SessionManager(repo, settings),
         ceremonies=CeremonyStore(),
         limiter=RateLimiter(),
@@ -102,14 +102,26 @@ def create_hub_app(
     return create_app(deps)
 
 
+def resolve_assets(settings: HubSettings, assets: AssetSource | None) -> AssetSource:
+    """The reviewer must see the real video: production never falls back to an empty in-memory
+    store (the preview would be blind and approval would rest on text alone)."""
+    if assets is not None:
+        return assets
+    if settings.env == "production":
+        raise RuntimeError("the production hub needs a real asset source (storage bucket)")
+    return InMemoryAssetSource()
+
+
 def _app_from_env() -> FastAPI:
     from ytcore.config import build_secrets_provider, load_settings
+    from ytcore.gateway.assets import GcsAssetSource
     from ytcore.secrets.provider import SecretRef
 
     core = load_settings()
     secrets = build_secrets_provider(core)
     dsn = secrets.get(SecretRef(core.database_url_ref)).reveal()
-    return create_hub_app(HubSettings(), conninfo=dsn, secrets=secrets)
+    assets = GcsAssetSource(core.storage_bucket) if core.storage_bucket else None
+    return create_hub_app(HubSettings(), conninfo=dsn, secrets=secrets, assets=assets)
 
 
 def __getattr__(name: str) -> Any:  # lazy `app` for uvicorn without import-time side effects

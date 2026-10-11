@@ -14,11 +14,12 @@ variable "channel_ids" {
 # so no secret material ever lands in state or in the repo.
 locals {
   platform_secrets = [
-    "approval-signing-key", # approval hub ONLY
-    "approval-public-key",  # gateway and verifiers
+    # The approval signing key is NOT a secret here: it lives in Cloud KMS and never leaves it.
+    "approval-public-key", # gateway and verifiers
     "anthropic-api-key",
     "youtube-oauth-client",
-    "database-url", # readable by every service that talks to Postgres
+    "database-url",  # readable by every service that talks to Postgres
+    "slack-webhook", # approval hub notifications
   ]
 }
 

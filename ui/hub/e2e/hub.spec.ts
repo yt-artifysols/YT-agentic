@@ -46,11 +46,14 @@ test("approver approves, edits and rejects; operator uses a kill switch", async 
   await expect(page.getByTestId("whoami")).toContainText("approver");
   await expect(page.getByTestId("queue-row")).toHaveCount(3);
 
-  // Approve with the keyboard shortcut from the preview screen.
+  // Approving needs the "I reviewed this version" confirmation; there is no one-key approve.
   await openJob(page, stack.jobs.approve);
   await expect(page.getByTestId("sources")).toBeVisible();
-  await expect(page.getByTestId("approve")).toBeVisible();
+  await expect(page.getByTestId("approve")).toBeDisabled();
   await page.keyboard.press("a");
+  await expect(page).not.toHaveURL(/done=approved/);
+  await page.getByTestId("reviewed").check();
+  await page.getByTestId("approve").click();
   await expect(page).toHaveURL(/done=approved/);
 
   // Edit: never approves; the job goes back to QA and returns with a diff.
@@ -70,6 +73,7 @@ test("approver approves, edits and rejects; operator uses a kill switch", async 
     .toBe(true);
   await expect(page.getByTestId("job-title")).toHaveText("Edited in the hub");
   await expect(page.getByTestId("diff-title")).toContainText("+ Edited in the hub");
+  await page.getByTestId("reviewed").check();
   await page.getByTestId("approve").click();
   await expect(page).toHaveURL(/done=approved/);
 

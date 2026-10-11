@@ -457,20 +457,27 @@ def create_app(deps: HubDeps) -> FastAPI:
     async def hub_error(_: Request, exc: HubError) -> JSONResponse:
         return JSONResponse({"detail": str(exc)}, status_code=exc.status)
 
-    def client_key(request: Request) -> str:
-        # Signed-in users are limited per session; anonymous callers per client address.
-        session = request.cookies.get("hub_session")
-        if session:
-            return "s:" + sha256(session).hex()[:32]
+    def address_key(request: Request) -> str:
         if s.trust_forwarded_for:
-            forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+            # The proxy in front appends the real client address LAST; earlier entries are
+            # client-supplied and spoofable.
+            forwarded = request.headers.get("x-forwarded-for", "").split(",")[-1].strip()
             if forwarded:
                 return "f:" + forwarded
         return "a:" + (request.client.host if request.client else "unknown")
 
+    def client_key(request: Request, bucket: str) -> str:
+        # The unauthenticated endpoints are limited per client ADDRESS only: a cookie value is
+        # attacker-chosen there, so keying on it would let anyone rotate it past the limit.
+        # Other buckets run for signed-in callers and are limited per session.
+        session = request.cookies.get("hub_session")
+        if session and bucket != "auth":
+            return "s:" + sha256(session).hex()[:32]
+        return address_key(request)
+
     def limit(bucket: str, per_minute: int) -> Any:
         def dep(request: Request) -> None:
-            deps.limiter.check(client_key(request), bucket, per_minute)
+            deps.limiter.check(client_key(request, bucket), bucket, per_minute)
 
         return Depends(dep)
 

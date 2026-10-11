@@ -19,6 +19,14 @@ variable "assets_bucket" { type = string }
 variable "backups_bucket" { type = string }
 variable "temporal_address" { type = string }
 variable "temporal_namespace" { type = string }
+variable "hub_origin" {
+  type        = string
+  description = "Public https origin of the approval hub UI (WebAuthn origin)."
+}
+variable "hub_rp_id" {
+  type        = string
+  description = "WebAuthn relying party id: the hub host or a parent domain."
+}
 variable "render_workers" {
   type        = number
   default     = 1
@@ -33,9 +41,35 @@ resource "google_service_account" "svc" {
   display_name = "${each.value} (${var.env})"
 }
 
-# The approval hub alone can read the private signing key.
-resource "google_secret_manager_secret_iam_member" "hub_signing_key" {
-  secret_id = var.platform_secret_ids["approval-signing-key"]
+# The approval signing key lives in Cloud KMS (Ed25519) and never leaves it: only the approval
+# hub's service account may ask KMS to sign. Everyone else gets the PUBLIC key as a secret.
+resource "google_kms_key_ring" "approval" {
+  project  = var.project_id
+  name     = "approval-${var.env}"
+  location = var.region
+}
+
+resource "google_kms_crypto_key" "approval_signing" {
+  name     = "approval-signing"
+  key_ring = google_kms_key_ring.approval.id
+  purpose  = "ASYMMETRIC_SIGN"
+  version_template {
+    algorithm        = "EC_SIGN_ED25519"
+    protection_level = "SOFTWARE"
+  }
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "google_kms_crypto_key_iam_member" "hub_signs" {
+  crypto_key_id = google_kms_crypto_key.approval_signing.id
+  role          = "roles/cloudkms.signerVerifier"
+  member        = "serviceAccount:${google_service_account.svc["approval-hub"].email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "hub_slack_webhook" {
+  secret_id = var.platform_secret_ids["slack-webhook"]
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.svc["approval-hub"].email}"
 }
@@ -77,6 +111,21 @@ locals {
     YT_STORAGE_BUCKET          = var.assets_bucket
     YT_DATABASE_URL_REF        = "vault://database-url"
     YT_APPROVAL_PUBLIC_KEY_REF = "vault://approval-public-key"
+  }
+
+  # Settings only the approval hub reads (the production validator refuses anything weaker).
+  hub_env = {
+    YT_HUB_ORIGIN              = var.hub_origin
+    YT_HUB_RP_ID               = var.hub_rp_id
+    YT_HUB_COOKIE_SECURE       = "true"
+    YT_HUB_TRUST_FORWARDED_FOR = "true" # the proxy in front appends the client address last
+    YT_HUB_KEY_BACKEND         = "kms"
+    YT_HUB_KMS_KEY_RESOURCE    = "${google_kms_crypto_key.approval_signing.id}/cryptoKeyVersions/1"
+    YT_HUB_SIGNALER_BACKEND    = "temporal"
+    YT_HUB_TEMPORAL_ADDRESS    = var.temporal_address
+    YT_HUB_TEMPORAL_NAMESPACE  = var.temporal_namespace
+    YT_HUB_NOTIFIER_BACKEND    = "slack"
+    YT_HUB_SLACK_WEBHOOK_REF   = "vault://slack-webhook"
   }
 }
 
@@ -146,7 +195,7 @@ resource "google_cloud_run_v2_service" "svc" {
     containers {
       image = each.value
       dynamic "env" {
-        for_each = local.common_env
+        for_each = merge(local.common_env, each.key == "approval-hub" ? local.hub_env : {})
         content {
           name  = env.key
           value = env.value
