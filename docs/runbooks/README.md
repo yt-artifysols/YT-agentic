@@ -6,6 +6,7 @@ your own named account (the database records `operator:<name>`), never a shared 
 
 | Situation | Runbook |
 |---|---|
+| Going live (first channels, game day, stop conditions) | [go-live.md](go-live.md) |
 | Rotating the approval signing key or a channel's OAuth token | [key-rotation.md](key-rotation.md) |
 | Stopping publishing at once (global, cluster, channel) | [kill-switch.md](kill-switch.md) |
 | A job that stopped moving, or an upload left pending | [stuck-job-recovery.md](stuck-job-recovery.md) |

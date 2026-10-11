@@ -58,6 +58,8 @@ render and QA; a HUMAN approval is mandatory before anything is published.
   deep review + spot checks; promotion = admin-confirmed recommendation (DB-enforced), demotion
   automatic on strike/rejection spike/policy flag. Tiers only choose the review lane: the gateway
   and token code never read them (tests enforce it)
+- `ytcore/ops/preflight.py` – `ytctl ops preflight`: read-only go/no-go before going live
+  (`docs/runbooks/go-live.md`)
 - `docs/runbooks` – kill switch, key rotation, stuck jobs, quota, strikes, suspension, restore
 - `tests/redteam` – adversarial suite (`make redteam`); must stay green
 - `ytctl` (`ytcore/cli.py`) – owner inputs and knowledge proposals

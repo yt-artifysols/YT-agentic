@@ -177,3 +177,32 @@ async def test_a_paused_cluster_starts_nothing(env: WorkflowEnvironment) -> None
         assert rig.backend.jobs[spec.job_id].state == JobState.PLANNED
         assert (await sup.query(ClusterSupervisorWorkflow.health)).paused
         await sup.cancel()
+
+
+async def test_a_busy_supervisor_continues_as_new_and_keeps_its_queue(
+    env: WorkflowEnvironment,
+) -> None:
+    rig = Rig(max_concurrent=2)
+    async with rig.worker(env):
+        first = await env.client.start_workflow(
+            ClusterSupervisorWorkflow.run,
+            SupervisorInput("cluster-a", idle_seconds=3600, max_history_events=20),
+            id="cluster-cluster-a",
+            task_queue=QUEUE,
+        )
+        current = env.client.get_workflow_handle("cluster-cluster-a")  # the latest run
+        first_run = (await current.describe()).run_id
+        specs = [rig.spec(h) for h in (6, 7, 8, 9, 10, 11)]
+        for spec in specs:
+            await current.signal(ClusterSupervisorWorkflow.enqueue, spec)
+        await _until(lambda: len(rig.awaiting()) == 6, "all six jobs awaiting approval", 60)
+        # a duplicate signal for a job from before the continue-as-new is still ignored
+        await current.signal(ClusterSupervisorWorkflow.enqueue, specs[0])
+        for spec in specs:
+            await rig.approve(env, spec.job_id)
+        await _until(lambda: len(rig.client.uploads) == 6, "six uploads", 60)
+        assert (await current.describe()).run_id != first_run  # it continued as new
+        health = await current.query(ClusterSupervisorWorkflow.health)
+        assert health.pending == 0
+        assert len(rig.client.uploads) == 6  # nothing ran twice
+        assert first.id == current.id

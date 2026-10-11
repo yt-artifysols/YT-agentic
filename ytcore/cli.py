@@ -12,6 +12,7 @@
     ytctl rollout status | gate CLUSTER             (sign-off and enabling happen in the hub)
     ytctl tier status | evaluate | report [--channel C]   (an admin confirms promotions in the hub)
     ytctl tier strike CHANNEL --kind strike --note "..." [--video-ref ID]   (demotes to approve-all)
+    ytctl ops preflight                                      (go/no-go before enabling a cluster)
     ytctl ops stuck | pending-uploads | plans
     ytctl ops adopt-upload --upload ID --video-id VIDEO      (after checking YouTube Studio)
     ytctl ops release-upload --upload ID --reason "no video exists on YouTube, checked ..."
@@ -109,6 +110,7 @@ def _parser() -> argparse.ArgumentParser:
     ops = sub.add_parser("ops", help="operations (see docs/runbooks)").add_subparsers(
         dest="cmd", required=True
     )
+    ops.add_parser("preflight", help="read-only go-live checks (exit 1 on any failure)")
     ops.add_parser("stuck", help="jobs, budgets, quota and uploads that need attention")
     ops.add_parser("pending-uploads", help="uploads left pending by a crash")
     adopt = ops.add_parser("adopt-upload", help="the video exists on YouTube: record it")
@@ -235,6 +237,13 @@ def _ops(args: argparse.Namespace, who: str) -> int:
         return psycopg.connect(dsn, autocommit=True)
 
     operator = who.removeprefix("cli:")
+    if args.cmd == "preflight":
+        from ytcore.config import build_secrets_provider, load_settings
+        from ytcore.ops import preflight
+
+        checks = preflight.run(connect, secrets=build_secrets_provider(load_settings()))
+        print(preflight.render(checks))
+        return 0 if preflight.go(checks) else 1
     if args.cmd == "stuck":
         findings = OpsMonitor(connect).findings()
         for f in findings:

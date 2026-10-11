@@ -96,6 +96,14 @@ PHASES = [
         "promotion, automatic demotion on strikes or rejection spikes, and a tier decision "
         "dashboard. No tier can bypass the approval token or the gateway.",
     ),
+    (
+        "Phase 7",
+        "Go-live hardening",
+        "done",
+        "Supervisor continue-as-new for long-lived clusters, a read-only go/no-go preflight "
+        "(`ytctl ops preflight`), a go-live runbook with a game day and stop conditions, and a "
+        "final end-to-end security review.",
+    ),
 ]
 
 INVARIANTS = [

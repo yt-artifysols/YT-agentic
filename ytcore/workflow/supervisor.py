@@ -33,11 +33,25 @@ class JobSpec:
     approval_timeout_seconds: int = 48 * 3600
 
 
+KNOWN_KEPT = 5000  # job ids remembered across continue-as-new (duplicate-signal protection)
+
+
 @dataclass(frozen=True)
 class SupervisorInput:
     cluster_id: str
     idle_seconds: int = 36 * 3600  # finish after this long with nothing to do
     recheck_seconds: int = 300  # how often to look again when held by the budget
+    # Continue as new (carrying the queue) once the history is this long and no job is in
+    # production, so a busy cluster's supervisor never nears Temporal's history limit.
+    max_history_events: int = 4000
+    # carried across continue-as-new:
+    carried_pending: tuple[JobSpec, ...] = ()
+    carried_known: tuple[str, ...] = ()
+    carried_started: int = 0
+    carried_outcomes: tuple[tuple[str, int], ...] = ()
+
+    def carried_pending_ids(self) -> tuple[str, ...]:
+        return tuple(spec.job_id for spec in self.carried_pending)
 
 
 @dataclass(frozen=True)
@@ -98,7 +112,7 @@ _RETRY = RetryPolicy(maximum_attempts=3)
 class ClusterSupervisorWorkflow:
     def __init__(self) -> None:
         self._pending: dict[str, JobSpec] = {}
-        self._known: set[str] = set()
+        self._known: dict[str, None] = {}  # insertion-ordered set
         self._producing: set[str] = set()  # started, not yet waiting for a human
         self._running = 0  # started, not yet finished (producing + awaiting a human)
         self._started = 0
@@ -110,7 +124,7 @@ class ClusterSupervisorWorkflow:
     @workflow.signal
     def enqueue(self, spec: JobSpec) -> None:
         if spec.job_id not in self._known:  # the planner may re-send after a crash
-            self._known.add(spec.job_id)
+            self._known[spec.job_id] = None
             self._pending[spec.job_id] = spec
             self._dirty = True
 
@@ -154,8 +168,38 @@ class ClusterSupervisorWorkflow:
     @workflow.run
     async def run(self, inp: SupervisorInput) -> SupervisorResult:
         self._health = ClusterHealth(inp.cluster_id)
+        # Merge, never overwrite: with signal-with-start the first `enqueue` is handled before
+        # this method begins, and it must survive.
+        for spec in inp.carried_pending:
+            self._pending.setdefault(spec.job_id, spec)
+        self._known = {
+            **dict.fromkeys((*inp.carried_known, *inp.carried_pending_ids())),
+            **self._known,
+        }
+        self._started += inp.carried_started
+        for key, n in inp.carried_outcomes:
+            self._outcomes[key] = self._outcomes.get(key, 0) + n
         idle_since = workflow.now()
         while True:
+            if (
+                workflow.info().get_current_history_length() >= inp.max_history_events
+                and not self._producing
+            ):
+                # Nothing is in production, so no child needs this run; the queue moves over.
+                # Children waiting for a human are abandoned (they never needed the supervisor
+                # again) and their "produced" signals find the next run by workflow id.
+                workflow.continue_as_new(
+                    SupervisorInput(
+                        inp.cluster_id,
+                        inp.idle_seconds,
+                        inp.recheck_seconds,
+                        inp.max_history_events,
+                        tuple(self._pending.values()),
+                        tuple(self._known)[-KNOWN_KEPT:],
+                        self._started,
+                        tuple(sorted(self._outcomes.items())),
+                    )
+                )
             limits: ClusterLimits | None = None
             if self._pending:
                 limits = await workflow.execute_activity_method(
