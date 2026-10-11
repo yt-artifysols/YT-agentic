@@ -1,0 +1,16 @@
+title = "ytcore gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Documented dev-only placeholders and test fixtures"
+paths = [
+  '''\.env\.example$''',
+]
+regexes = [
+  '''ytcore-dev''',
+  '''dummy-(value|pw)''',
+  # Type annotations naming the key class, not key material.
+  '''Ed25519PrivateKey''',
+]

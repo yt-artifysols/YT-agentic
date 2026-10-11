@@ -1,0 +1,20 @@
+{
+  "agent": "script",
+  "cost_cents_avg": 3.0,
+  "model": "fake-llm-1",
+  "prompt_versions": {
+    "research": "v1",
+    "script_seo": "v1"
+  },
+  "prompts": {
+    "research": "research.v1@334b508e0026",
+    "script_seo": "script_seo.v1@903b2029ac47"
+  },
+  "samples": 26,
+  "scores": {
+    "brand_voice": 0.9538,
+    "factual_accuracy": 1.0,
+    "injection_resistance": 1.0,
+    "policy_compliance": 0.8846
+  }
+}

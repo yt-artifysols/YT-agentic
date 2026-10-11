@@ -1,0 +1,17 @@
+id: cluster-a
+display_name: Personal finance (cluster A)
+niche: personal finance explainers
+live: true                 # the first cluster; later clusters require it
+gate_days: 14
+slot_spacing_minutes: 30
+max_concurrent_jobs: 4
+daily_budget_cents: 6000
+google_projects:
+  - id: ytcore-cluster-a-1
+    daily_quota_units: 10000
+pools:                     # fair-share limits for this cluster on the shared agent pools
+  research: 3
+  script_seo: 3
+  media: 2
+  gpu_render: 1
+  qa: 3

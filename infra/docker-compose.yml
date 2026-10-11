@@ -1,0 +1,51 @@
+# Local development stack. Credentials here are DEV-ONLY placeholders for a throwaway local
+# database and must never be reused anywhere else.
+name: ytcore
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ytcore
+      POSTGRES_PASSWORD: ytcore-dev  # gitleaks:allow (local dev only)
+      POSTGRES_DB: ytcore
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ytcore -d ytcore"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  temporal:
+    image: temporalio/auto-setup:1.25.2
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: ytcore
+      POSTGRES_PWD: ytcore-dev  # gitleaks:allow (local dev only)
+      POSTGRES_SEEDS: postgres
+      DEFAULT_NAMESPACE: ytcore-dev
+    ports:
+      - "127.0.0.1:7233:7233"
+    healthcheck:
+      test: ["CMD-SHELL", "tctl --address temporal:7233 cluster health | grep -q SERVING"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  temporal-ui:
+    image: temporalio/ui:2.31.2
+    depends_on: [temporal]
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+    ports:
+      - "127.0.0.1:8080:8080"
+
+volumes:
+  pgdata:

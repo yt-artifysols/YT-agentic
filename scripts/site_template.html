@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<meta name="robots" content="noindex">
+<style>
+:root {
+  --bg: #f7f7f5; --panel: #ffffff; --ink: #1c1c1a; --muted: #6b6b66; --line: #e3e2dc;
+  --accent: #b4441c; --ok: #2f7d4a; --ok-bg: #e6f2ea; --gate: #8a5a00; --gate-bg: #fbf0d9;
+  --term: #4b4b8f; --term-bg: #ebebf7; --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #151514; --panel: #1e1e1c; --ink: #ecebe6; --muted: #9a9993; --line: #33322f;
+    --accent: #f08a5d; --ok: #7fcf98; --ok-bg: #1d3325; --gate: #f0c060; --gate-bg: #3a2f14;
+    --term: #a9a9f0; --term-bg: #26264a;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { padding: 40px 16px 24px; max-width: 1080px; margin: 0 auto; }
+header h1 { margin: 0 0 6px; font-size: 28px; letter-spacing: -0.01em; }
+header p { margin: 0; color: var(--muted); }
+.meta { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { font: 12px var(--mono); padding: 3px 8px; border: 1px solid var(--line);
+  border-radius: 999px; background: var(--panel); color: var(--muted); }
+nav { position: sticky; top: 0; background: var(--bg); border-bottom: 1px solid var(--line);
+  z-index: 2; }
+nav div { max-width: 1080px; margin: 0 auto; padding: 0 16px; display: flex; gap: 18px;
+  overflow-x: auto; }
+nav a { color: var(--muted); text-decoration: none; padding: 12px 0; white-space: nowrap;
+  font-size: 14px; border-bottom: 2px solid transparent; }
+nav a:hover { color: var(--ink); border-color: var(--accent); }
+main { max-width: 1080px; margin: 0 auto; padding: 8px 16px 64px; }
+section { margin-top: 36px; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);
+  margin: 0 0 12px; font-weight: 600; }
+.grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 16px; min-width: 0; }
+.card h3 { margin: 0 0 4px; font-size: 16px; }
+.card p { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
+.badge { display: inline-block; font: 600 11px var(--mono); padding: 2px 7px; border-radius: 5px;
+  text-transform: uppercase; letter-spacing: 0.04em; }
+.done { color: var(--ok); background: var(--ok-bg); }
+.gated { color: var(--gate); background: var(--gate-bg); }
+.terminal { color: var(--term); background: var(--term-bg); }
+ol.inv { margin: 0; padding-left: 20px; } ol.inv li { margin: 4px 0; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line);
+  vertical-align: top; }
+th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
+td code, .mono { font-family: var(--mono); font-size: 13px; }
+.scroll { overflow-x: auto; }
+.diagram { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 16px; overflow-x: auto; }
+details { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  margin-bottom: 8px; }
+summary { cursor: pointer; padding: 12px 16px; font-weight: 600; }
+summary .count { color: var(--muted); font-weight: 400; font-family: var(--mono); font-size: 13px; }
+details > div { padding: 0 16px 14px; }
+ul.tests { margin: 0; padding-left: 18px; columns: 2 280px; font: 13px var(--mono);
+  color: var(--muted); }
+.doc { overflow-x: auto; } .doc h1 { font-size: 20px; } .doc h2 { font-size: 15px;
+  text-transform: none; letter-spacing: 0; color: var(--ink); margin-top: 18px; }
+.doc table { font-size: 13px; }
+.stat { font-size: 30px; font-weight: 700; letter-spacing: -0.02em; }
+footer { color: var(--muted); font-size: 13px; text-align: center; padding: 24px 16px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>yt-agentic — development status</h1>
+  <p>Agentic control system producing videos for up to 20 YouTube channels. Every publish
+     requires a human approval.</p>
+  <div class="meta" id="meta"></div>
+</header>
+<nav><div>
+  <a href="#phases">Phases</a><a href="#stats">Numbers</a><a href="#states">State machine</a>
+  <a href="#invariants">Invariants</a><a href="#migrations">Migrations</a>
+  <a href="#tests">Tests</a><a href="#commits">Commits</a><a href="#docs">ADRs &amp; threat model</a>
+</div></nav>
+<main>
+  <section id="phases"><h2>Phases</h2><div class="grid" id="phase-cards"></div></section>
+  <section id="stats"><h2>Numbers</h2><div class="grid" id="stat-cards"></div></section>
+  <section id="states"><h2>Job state machine (from states.py)</h2>
+    <div class="diagram"><pre class="mermaid" id="mermaid"></pre></div>
+    <div class="card scroll" style="margin-top:12px"><table id="state-table">
+      <thead><tr><th>State</th><th>Flags</th><th>Allowed next states</th></tr></thead>
+      <tbody></tbody></table></div>
+  </section>
+  <section id="invariants"><h2>Non-negotiable invariants</h2>
+    <div class="card"><ol class="inv" id="inv"></ol></div></section>
+  <section id="migrations"><h2>Migrations</h2><div class="card scroll"><table id="mig">
+    <thead><tr><th>File</th><th>Kind</th></tr></thead><tbody></tbody></table></div></section>
+  <section id="tests"><h2>Test inventory</h2><div id="test-list"></div></section>
+  <section id="commits"><h2>Recent commits</h2><div class="card scroll"><table id="commit-table">
+    <thead><tr><th>Commit</th><th>Date</th><th>Subject</th></tr></thead><tbody></tbody>
+  </table></div></section>
+  <section id="docs"><h2>ADRs &amp; threat model</h2><div id="doc-list"></div></section>
+</main>
+<footer id="footer"></footer>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+<script>
+const DATA = /*__DATA__*/null;
+const el = (tag, attrs = {}, ...kids) => {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) k === "text" ? (n.textContent = v) : n.setAttribute(k, v);
+  for (const c of kids) n.append(c);
+  return n;
+};
+const meta = document.getElementById("meta");
+[["branch", DATA.branch], ["commit", DATA.head], ["built", DATA.built]].forEach(([k, v]) =>
+  meta.append(el("span", { class: "chip", text: `${k}: ${v}` })));
+
+const phases = document.getElementById("phase-cards");
+DATA.phases.forEach(p => phases.append(el("div", { class: "card" },
+  el("span", { class: `badge ${p.status}`, text: p.status }),
+  el("h3", { text: `${p.id}: ${p.title}` }), el("p", { text: p.summary }))));
+
+const testCount = DATA.tests.reduce((n, g) => n + g.tests.length, 0);
+const stats = document.getElementById("stat-cards");
+[["Job states", DATA.states.length], ["Transitions", DATA.states.reduce((n, s) => n + s.next.length, 0)],
+ ["Migrations", DATA.migrations.length], ["Test cases (Python functions + SQL assertions)", testCount]]
+  .forEach(([k, v]) => stats.append(el("div", { class: "card" },
+    el("div", { class: "stat", text: String(v) }), el("p", { text: k }))));
+
+const tbody = document.querySelector("#state-table tbody");
+DATA.states.forEach(s => {
+  const flags = el("td");
+  if (s.gated) flags.append(el("span", { class: "badge gated", text: "approval-gated" }), " ");
+  if (s.terminal) flags.append(el("span", { class: "badge terminal", text: "terminal" }));
+  tbody.append(el("tr", {}, el("td", {}, el("code", { text: s.state })), flags,
+    el("td", { class: "mono", text: s.next.join(", ") || "—" })));
+});
+
+const inv = document.getElementById("inv");
+DATA.invariants.forEach(t => inv.append(el("li", { text: t })));
+
+const mig = document.querySelector("#mig tbody");
+DATA.migrations.forEach(m => mig.append(el("tr", {}, el("td", {}, el("code", { text: m })),
+  el("td", { text: m.startsWith("002_") ? "generated, repeatable" : "immutable" }))));
+
+const tl = document.getElementById("test-list");
+DATA.tests.forEach(g => {
+  const ul = el("ul", { class: "tests" });
+  g.tests.forEach(t => ul.append(el("li", { text: t })));
+  tl.append(el("details", {}, el("summary", {}, g.file + " ",
+    el("span", { class: "count", text: `(${g.tests.length})` })), el("div", {}, ul)));
+});
+
+const ct = document.querySelector("#commit-table tbody");
+DATA.commits.forEach(c => ct.append(el("tr", {}, el("td", {}, el("code", { text: c.sha })),
+  el("td", { class: "mono", text: c.date }), el("td", { text: c.subject }))));
+
+const dl = document.getElementById("doc-list");
+DATA.docs.forEach(d => {
+  const body = el("div", { class: "doc" });
+  // Repo-authored markdown only (ADRs and threat model); no external input.
+  body.innerHTML = window.marked ? marked.parse(d.markdown) : "";
+  if (!window.marked) body.append(el("pre", { text: d.markdown }));
+  dl.append(el("details", {}, el("summary", { text: d.title }), body));
+});
+
+document.getElementById("mermaid").textContent = DATA.mermaid;
+if (window.mermaid) {
+  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  mermaid.initialize({ startOnLoad: false, theme: dark ? "dark" : "neutral" });
+  mermaid.run({ querySelector: "#mermaid" });
+}
+document.getElementById("footer").textContent =
+  "Generated by scripts/build_site.py from the repository. Static page; no live data or secrets.";
+</script>
+</body>
+</html>
