@@ -49,7 +49,7 @@ async def plan(authorization: str | None = Header(default=None)) -> dict[str, ob
     _authorize(authorization)
     planner = _runtime().planner
     if planner is None:
-        raise HTTPException(503, "OPS_DATABASE_URL is not configured")
+        raise HTTPException(503, "YT_OPS_DATABASE_URL is not configured")
     run = planner.run()
     res = await _runtime().driver.tick(max_jobs=25, budget_seconds=200)  # start on new jobs now
     return {

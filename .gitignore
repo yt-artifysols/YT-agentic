@@ -55,3 +55,4 @@ site/hub-demo/
 
 deploy/vercel/*/ytcore/
 deploy/vercel/*/config/
+.secrets-staging/
