@@ -26,6 +26,8 @@ class DbSignaler:
     def __init__(
         self, conninfo: str, *, wake_url: str = "", wake_secret: str = "", wake_timeout: float = 3.0
     ) -> None:
+        if wake_url and not wake_url.startswith("https://"):
+            raise ValueError("the wake URL must be https")
         self._conninfo = conninfo
         self._wake_url = wake_url
         self._wake_secret = wake_secret

@@ -12,8 +12,10 @@ from functools import lru_cache
 
 from fastapi import FastAPI, Header, HTTPException
 
+from ytcore.safety.scrub import install_log_scrubber
 from ytcore.serverless.runtime import JobsRuntime, build_jobs_runtime
 
+install_log_scrubber()
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
 

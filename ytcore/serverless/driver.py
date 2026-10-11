@@ -286,6 +286,8 @@ class JobDriver:
         except Exception as exc:
             log.error("could not fail job %s: %s", job_id, type(exc).__name__)
             return False
+        for d in self._decisions(job_id):  # a failed job keeps no approval token around
+            self._consume(d.id)
         return True
 
     async def tick(
@@ -312,6 +314,9 @@ class JobDriver:
             except _Retry:
                 failed = True
             except ApplicationError as exc:
+                if exc.type == "UploadInProgress":  # retryable: a later tick sees the upload
+                    failed = True
+                    continue
                 log.warning("job %s failed: %s: %s", job.id, exc.type, exc.message)
                 failed = not await self._fail(job.id)
                 result.failed.append(job.id)
