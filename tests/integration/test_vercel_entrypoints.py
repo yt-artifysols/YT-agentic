@@ -48,7 +48,7 @@ async def test_hub_boots_from_env_and_rejects_anonymous(
     _env(
         monkeypatch,
         ENV="staging",
-        DATABASE_URL=as_role(database, "yt_hub"),
+        YT_HUB_DATABASE_URL=as_role(database, "yt_hub"),
         YT_HUB_SIGNING_KEY_PEM=pem.decode(),
         YT_HUB_ORIGIN="https://hub.example.test",
         YT_HUB_RP_ID="hub.example.test",
@@ -94,7 +94,8 @@ def _run_jobs_entrypoint(
         monkeypatch,
         ENV="staging",
         YT_SECRETS_BACKEND="platform_env",
-        DATABASE_URL=as_role(db, "yt_worker"),
+        YT_DATABASE_URL_REF="env://YT_JOBS_DATABASE_URL",
+        YT_JOBS_DATABASE_URL=as_role(db, "yt_worker"),
         APPROVAL_PUBLIC_KEY=public_pem_text,
         CRON_SECRET="s3cret-for-tests",
     )
@@ -131,9 +132,20 @@ def _run_jobs_entrypoint(
             ok = await c.get("/api/cron/tick", headers=auth)
             assert ok.status_code == 200, ok.text
             assert ok.json()["advanced"] == 1
-            # no OPS_DATABASE_URL: the planner is off, not guessed
+            # no YT_OPS_DATABASE_URL: the planner is off, not guessed
             assert (await c.get("/api/cron/plan", headers=auth)).status_code == 503
 
     asyncio.run(run())
     state = conn.execute("SELECT state FROM video_jobs WHERE id = %s", (job,)).fetchone()
     assert state == ("awaiting_approval",)
+
+
+def test_services_refuse_the_owner_or_the_wrong_role(database: str) -> None:
+    from ytcore.serverless.runtime import require_service_role
+
+    require_service_role(as_role(database, "yt_hub"), "yt_hub")
+    require_service_role(as_role(database, "yt_worker"), "yt_worker")
+    with pytest.raises(RuntimeError, match="limited member"):
+        require_service_role(database, "yt_hub")  # the owner/migration login
+    with pytest.raises(RuntimeError, match="limited member"):
+        require_service_role(as_role(database, "yt_worker"), "yt_hub")  # wrong service
