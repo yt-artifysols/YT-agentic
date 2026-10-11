@@ -67,5 +67,9 @@ class InputRejected(StoreError):
     """An owner input violates a rule (duplicate, immutable, wrong channel, archived)."""
 
 
+class TierRefused(StoreError):
+    """An approval-tier change that the rules do not allow (no admin confirmation, no reason)."""
+
+
 class RolloutRefused(StoreError):
     """A cluster cannot go live yet (prerequisite not met, or no human sign-off)."""

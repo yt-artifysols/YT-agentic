@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from ytcore.knowledge.models import KnowledgeKind
 from ytcore.safety.policy import SafetyPolicy
 from ytcore.safety.scrub import SecretInInput, ensure_no_secrets
+from ytcore.tiers.rules import TierRules
 
 SLUG = re.compile(r"^[a-z0-9][a-z0-9_-]{1,62}$")
 POOLS = ("research", "script_seo", "media", "gpu_render", "qa")
@@ -181,6 +182,8 @@ class PlatformCfg(_Strict):
         default_factory=dict
     )
     targets: TargetsCfg = Field(default_factory=TargetsCfg)
+    # Approval tiers: spot-check share, promotion and demotion rules (never auto-promote).
+    tiers: TierRules = Field(default_factory=TierRules)
 
 
 class FleetCfg(_Strict):

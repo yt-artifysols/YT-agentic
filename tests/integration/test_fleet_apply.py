@@ -53,6 +53,28 @@ def test_apply_creates_everything_then_changes_nothing(db: str) -> None:
     ] == sum(len(c.knowledge()) for c in fleet.channels.values())
 
 
+def test_tier_rules_are_applied_but_config_can_never_set_a_channel_tier(db: str) -> None:
+    fleet = load_fleet(CONFIG_ROOT / "examples")
+    apply_fleet(_connect(db), fleet)
+    rules = _sql(db, "SELECT rules FROM tier_rules")[0][0]
+    assert rules == fleet.platform.tiers.to_json() and rules["spot_check_percent"] == 10
+    # every channel starts on approve-all; only a confirmed recommendation promotes
+    assert {r[0] for r in _sql(db, "SELECT approval_tier FROM channels")} == {1}
+    with pytest.raises(ConfigError):
+        load_fleet_with_channel_extra(db)
+
+
+def load_fleet_with_channel_extra(db: str) -> Any:
+    from ytcore.channels.config import ChannelCfg
+
+    try:
+        return ChannelCfg.model_validate(
+            {"slug": "x", "display_name": "X", "cluster": "c", "approval_tier": 2}
+        )
+    except ValueError as exc:  # pydantic: extra fields are forbidden
+        raise ConfigError(str(exc)) from None
+
+
 def test_channel_rows_follow_the_config(db: str) -> None:
     apply_fleet(_connect(db), load_fleet(CONFIG_ROOT / "examples"))
     row = _sql(

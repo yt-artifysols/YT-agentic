@@ -21,6 +21,7 @@ export function TopBar() {
         <Link href="/">Queue</Link>
         {me && <Link href="/clusters">Clusters</Link>}
         {me && <Link href="/scorecards">Scorecards</Link>}
+        {me && <Link href="/tiers">Tiers</Link>}
         {me && me.role !== "approver" && <Link href="/controls">Kill switches</Link>}
       </nav>
       {me && (

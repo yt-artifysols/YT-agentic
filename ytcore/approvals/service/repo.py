@@ -18,6 +18,7 @@ from ytcore.knowledge.models import KnowledgeDoc
 from ytcore.knowledge.store import doc_from_row
 from ytcore.store.errors import StoreError
 from ytcore.store.postgres import Connect, map_db_error
+from ytcore.tiers.service import Rng, TierService
 
 Role = Literal["approver", "operator", "admin"]
 
@@ -48,6 +49,25 @@ class QueueItem:
     flag_count: int
     approval_deadline: datetime | None
     fast_lane: bool
+    lane: str = "standard"
+    lane_reason: str = ""
+
+
+@dataclass(frozen=True)
+class LaneInfo:
+    """How a human should review this video: `standard` (tier 1, approve-all), `fast` (tier 2,
+    low risk, one-tap batch) or `deep` (tier 2: risky, flagged or a spot check)."""
+
+    job_id: str
+    channel_id: str
+    content_hash: str | None
+    tier: int
+    lane: str
+    reason: str
+    low_risk: bool
+    spot_check: bool
+    risk_score: int | None
+    flag_count: int
 
 
 @dataclass(frozen=True)
@@ -112,9 +132,16 @@ class HubConflict(StoreError):
 
 
 class HubRepository:
-    def __init__(self, connect: Connect, *, fast_lane_max_risk: int = 20) -> None:
+    def __init__(
+        self, connect: Connect, *, fast_lane_max_risk: int = 20, rng: Rng | None = None
+    ) -> None:
         self._connect = connect
         self._fast_lane_max_risk = fast_lane_max_risk
+        self._tiers = TierService(connect, rng=rng)
+
+    @property
+    def tiers(self) -> TierService:
+        return self._tiers
 
     @classmethod
     def from_conninfo(cls, conninfo: str, **kw: Any) -> HubRepository:
@@ -176,7 +203,7 @@ class HubRepository:
             "SELECT j.id::text, j.channel_id, c.cluster_id, "
             "coalesce(j.manifest->'metadata'->>'title', ''), j.origin, j.content_hash, "
             "j.manifest_version, qa.risk_score, qa.passed, "
-            "coalesce(jsonb_array_length(qa.flags), 0), j.approval_deadline "
+            "coalesce(jsonb_array_length(qa.flags), 0), j.approval_deadline, c.approval_tier "
             "FROM video_jobs j JOIN channels c ON c.id = j.channel_id "
             + self._LATEST_QA
             + " WHERE j.state = 'awaiting_approval'"
@@ -196,27 +223,102 @@ class HubRepository:
         }
         with self._tx("hub:reader") as conn:
             rows = conn.execute(sql, params).fetchall()
-        items = [
-            QueueItem(
-                job_id=r[0],
-                channel_id=r[1],
-                cluster_id=r[2],
-                title=r[3],
-                origin=r[4],
-                content_hash=r[5],
-                manifest_version=r[6],
-                risk_score=r[7],
-                qa_passed=r[8],
-                flag_count=r[9],
-                approval_deadline=r[10],
-                fast_lane=self._is_fast_lane(r[8], r[7], r[9]),
-            )
-            for r in rows
-        ]
+            percent = self._spot_percent(conn)
+            items = []
+            for r in rows:
+                lane = self._lane(
+                    conn, job_id=r[0], channel_id=r[1], content_hash=r[5], tier=r[11],
+                    passed=r[8], risk=r[7], flags=r[9], percent=percent,
+                )  # fmt: skip
+                items.append(
+                    QueueItem(
+                        job_id=r[0],
+                        channel_id=r[1],
+                        cluster_id=r[2],
+                        title=r[3],
+                        origin=r[4],
+                        content_hash=r[5],
+                        manifest_version=r[6],
+                        risk_score=r[7],
+                        qa_passed=r[8],
+                        flag_count=r[9],
+                        approval_deadline=r[10],
+                        fast_lane=lane.lane == "fast",
+                        lane=lane.lane,
+                        lane_reason=lane.reason,
+                    )
+                )
         return [i for i in items if i.fast_lane] if fast_lane_only else items
 
-    def _is_fast_lane(self, passed: bool | None, risk: int | None, flags: int) -> bool:
+    def _is_low_risk(self, passed: bool | None, risk: int | None, flags: int) -> bool:
         return bool(passed) and risk is not None and risk <= self._fast_lane_max_risk and not flags
+
+    @staticmethod
+    def _spot_percent(conn: psycopg.Connection[Any]) -> float:
+        row = conn.execute("SELECT rules->>'spot_check_percent' FROM tier_rules").fetchone()
+        return float(row[0]) if row and row[0] is not None else 10.0
+
+    def _lane(
+        self,
+        conn: psycopg.Connection[Any],
+        *,
+        job_id: str,
+        channel_id: str,
+        content_hash: str | None,
+        tier: int,
+        passed: bool | None,
+        risk: int | None,
+        flags: int,
+        percent: float,
+    ) -> LaneInfo:
+        """The review lane, from the channel's CURRENT tier (a demotion applies to queued jobs)."""
+        low = self._is_low_risk(passed, risk, flags)
+
+        def info(lane: str, reason: str, spot: bool = False) -> LaneInfo:
+            return LaneInfo(job_id, channel_id, content_hash, tier, lane, reason, low, spot,
+                            risk, flags)  # fmt: skip
+
+        if tier < 2:
+            return info("standard", "approve-all tier: every video is reviewed one by one")
+        if not low:
+            why = "QA did not pass" if passed is False else f"risk {risk}, {flags} flag(s)"
+            return info("deep", f"deep review: {why}")
+        if content_hash is None:
+            return info("deep", "deep review: no content hash yet")
+        if self._tiers.spot_check(conn, job_id, content_hash, channel_id, percent):
+            return info("deep", "deep review: spot check of a low-risk video", True)
+        return info("fast", f"fast lane: risk {risk}, no flags")
+
+    def lane_for(self, job_id: str) -> LaneInfo | None:
+        """The lane for a job awaiting approval, judged on the CURRENT content."""
+        with self._tx("hub:reader") as conn:
+            r = conn.execute(
+                "SELECT j.channel_id, j.content_hash, c.approval_tier, qa.passed, qa.risk_score, "
+                "coalesce(jsonb_array_length(qa.flags), 0), qa.content_hash "
+                "FROM video_jobs j JOIN channels c ON c.id = j.channel_id "
+                + self._LATEST_QA
+                + " WHERE j.id = %s",
+                (job_id,),
+            ).fetchone()
+            if r is None:
+                return None
+            stale = r[6] not in (None, r[1])  # the latest QA judged other content
+            return self._lane(
+                conn, job_id=job_id, channel_id=r[0], content_hash=r[1], tier=r[2],
+                passed=None if stale else r[3], risk=None if stale else r[4], flags=r[5],
+                percent=self._spot_percent(conn),
+            )  # fmt: skip
+
+    def record_outcome(self, info: LaneInfo, content_hash: str, decision: str, who: str) -> None:
+        """What the human decided, next to the lane and risk the system predicted."""
+        with self._tx(f"hub:{who}") as conn:
+            conn.execute(
+                "INSERT INTO review_outcomes (job_id, channel_id, content_hash, decision, lane, "
+                "spot_check, risk_score, flag_count, low_risk, tier, decided_by) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (info.job_id, info.channel_id, content_hash, decision, info.lane, info.spot_check,
+                 info.risk_score, info.flag_count, info.low_risk, info.tier, who),
+            )  # fmt: skip
 
     def head(self, job_id: str) -> JobHead | None:
         with self._tx("hub:reader") as conn:
@@ -249,13 +351,10 @@ class HubRepository:
         return None if r is None else dict(r[0])
 
     def is_fast_lane(self, job_id: str) -> bool:
-        """Fast lane needs a passing, low-risk, unflagged QA report for the CURRENT content."""
-        info, head = self.qa(job_id), self.head(job_id)
-        if info is None or head is None:
-            return False
-        if info.content_hash not in (None, head.content_hash):
-            return False
-        return self._is_fast_lane(info.passed, info.risk_score, len(info.flags))
+        """Fast lane needs a risk-based channel (tier 2) and a passing, low-risk, unflagged QA
+        report for the CURRENT content that was not drawn as a spot check."""
+        info = self.lane_for(job_id)
+        return info is not None and info.lane == "fast"
 
     # ------------------------------------------------------------------ decisions
 

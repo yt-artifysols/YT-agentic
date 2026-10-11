@@ -22,6 +22,8 @@ export interface QueueItem {
   flag_count: number;
   approval_deadline: string | null;
   fast_lane: boolean;
+  lane: "standard" | "fast" | "deep";
+  lane_reason: string;
 }
 
 export interface QA {
@@ -48,6 +50,8 @@ export interface Preview {
   thumbnail_url: string | null;
   qa: QA | null;
   fast_lane: boolean;
+  lane: "standard" | "fast" | "deep";
+  lane_reason: string;
   previous: { version: number; metadata: Record<string, unknown> } | null;
 }
 
@@ -105,6 +109,38 @@ export interface Gate {
   scorecard_days: number;
   problems: string[];
   ok: boolean;
+}
+
+export interface TierRow {
+  channel_id: string;
+  name: string;
+  cluster_id: string | null;
+  tier: number;
+  tier_since: string;
+  last_change_kind: string | null;
+  last_change_reason: string | null;
+  last_change_at: string | null;
+  recommendation_id: number | null;
+  recommendation_evidence: Record<string, unknown> | null;
+}
+
+export interface TierChange {
+  id: number;
+  channel_id: string;
+  from_tier: number;
+  to_tier: number;
+  kind: "promotion" | "demotion";
+  reason: string;
+  actor: string;
+  evidence: Record<string, unknown>;
+  recommendation_id: number | null;
+  created_at: string;
+}
+
+export interface TierReport {
+  spot_checks: { n: number; disagreements: number; rate: number | null };
+  low_risk_all: { n: number; disagreements: number; rate: number | null };
+  by_risk_bucket: Record<string, { n: number; not_approved: number }>;
 }
 
 export class ApiError extends Error {
@@ -192,6 +228,18 @@ export const api = {
     request<{ id: number }>("POST", `/api/rollout/${encodeURIComponent(cluster)}/signoff`, { note }),
   enableCluster: (cluster: string) =>
     request<{ ok: boolean }>("POST", `/api/rollout/${encodeURIComponent(cluster)}/enable`, {}),
+
+  tiers: () => request<TierRow[]>("GET", "/api/tiers"),
+  tierChanges: (channel = "") =>
+    request<TierChange[]>("GET", `/api/tiers/changes${channel ? `?channel=${encodeURIComponent(channel)}` : ""}`),
+  tierReport: (channel = "") =>
+    request<TierReport>("GET", `/api/tiers/report${channel ? `?channel=${encodeURIComponent(channel)}` : ""}`),
+  confirmTier: (id: number, note: string) =>
+    request<{ ok: boolean }>("POST", `/api/tiers/recommendations/${id}/confirm`, { note }),
+  dismissTier: (id: number, note: string) =>
+    request<{ ok: boolean }>("POST", `/api/tiers/recommendations/${id}/dismiss`, { note }),
+  recordStrike: (channel: string, body: { kind: string; note: string; video_ref?: string }) =>
+    request<{ id: number }>("POST", `/api/channels/${encodeURIComponent(channel)}/strikes`, body),
 
   controls: () => request<Controls>("GET", "/api/controls"),
   setGlobal: (paused: boolean, reason: string) => request<{ ok: boolean }>("POST", "/api/controls/global", { paused, reason }),

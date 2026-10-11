@@ -200,6 +200,7 @@ locals {
     planner   = { command = ["python", "-m", "ytcore.workflow.worker", "plan-once"], schedule = "5 * * * *", timeout = "300s" }
     monitor   = { command = ["python", "-m", "ytcore.observability.monitor", "check"], schedule = "*/10 * * * *", timeout = "120s" }
     breaker   = { command = ["python", "-m", "ytcore.safety.breaker", "run-once"], schedule = "*/30 * * * *", timeout = "120s" }
+    tiers     = { command = ["python", "-m", "ytcore.tiers", "run-once"], schedule = "*/15 * * * *", timeout = "120s" }
     analytics = { command = ["python", "-m", "ytcore.analytics.ingest", "run-daily"], schedule = "30 3 * * *", timeout = "1800s" }
     backup    = { command = ["python", "-m", "ytcore.ops.backup", "backup", "--dir", "/tmp/backup", "--bucket", var.backups_bucket], schedule = "15 2 * * *", timeout = "3600s" }
   }

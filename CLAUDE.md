@@ -54,6 +54,10 @@ render and QA; a HUMAN approval is mandatory before anything is published.
   cluster B cannot be enabled before cluster A was live `gate_days` and an admin signed off);
   `ytcore/scheduling` – pool leases (fair share, deadline priority); `ytcore/workflow/supervisor.py`
   – per-cluster supervisor (caps jobs in production); adding a channel needs no code changes
+- `ytcore/tiers` – approval tiers (migration 013): tier 1 approve-all, tier 2 risk-based fast lane +
+  deep review + spot checks; promotion = admin-confirmed recommendation (DB-enforced), demotion
+  automatic on strike/rejection spike/policy flag. Tiers only choose the review lane: the gateway
+  and token code never read them (tests enforce it)
 - `docs/runbooks` – kill switch, key rotation, stuck jobs, quota, strikes, suspension, restore
 - `tests/redteam` – adversarial suite (`make redteam`); must stay green
 - `ytctl` (`ytcore/cli.py`) – owner inputs and knowledge proposals

@@ -109,13 +109,15 @@ export default function JobPage() {
         <h1 data-testid="job-title">{job.title || job.job_id}</h1>
         <div className="row">
           {job.qa && <RiskBadge risk={job.qa.risk_score} />}
-          {job.fast_lane && <span className="badge risk-low">fast lane</span>}
+          {job.fast_lane && <span className="badge risk-low" title={job.lane_reason}>fast lane</span>}
+          {job.lane === "deep" && <span className="badge risk-high" title={job.lane_reason}>deep review</span>}
           <span className="badge">{job.state}</span>
         </div>
       </div>
       <p className="mono muted">
         {job.channel_id} · version {job.manifest_version} · {job.content_hash.slice(0, 19)}…
       </p>
+      {job.lane_reason && <p className="muted" data-testid="lane-reason">{job.lane_reason}</p>}
       {error && <div className="notice err" role="alert">{error}</div>}
 
       {canDecide && (

@@ -53,6 +53,7 @@ from ytcore.store.errors import (
     KnowledgeStale,
     RolloutRefused,
     StoreError,
+    TierRefused,
 )
 
 # ----------------------------------------------------------------------------- schemas
@@ -92,6 +93,8 @@ class QueueItemOut(BaseModel):
     flag_count: int
     approval_deadline: datetime | None
     fast_lane: bool
+    lane: Literal["standard", "fast", "deep"]
+    lane_reason: str
 
 
 class AssetOut(BaseModel):
@@ -129,7 +132,49 @@ class PreviewOut(BaseModel):
     thumbnail_url: str | None
     qa: QAOut | None
     fast_lane: bool
+    lane: Literal["standard", "fast", "deep"]
+    lane_reason: str
     previous: PreviousVersionOut | None
+
+
+class TierRowOut(BaseModel):
+    channel_id: str
+    name: str
+    cluster_id: str | None
+    tier: int
+    tier_since: datetime
+    last_change_kind: str | None
+    last_change_reason: str | None
+    last_change_at: datetime | None
+    recommendation_id: int | None
+    recommendation_evidence: dict[str, Any] | None
+
+
+class TierChangeOut(BaseModel):
+    id: int
+    channel_id: str
+    from_tier: int
+    to_tier: int
+    kind: Literal["promotion", "demotion"]
+    reason: str
+    actor: str
+    evidence: dict[str, Any]
+    recommendation_id: int | None
+    created_at: datetime
+
+
+class TierDecisionIn(BaseModel):
+    note: Annotated[str, Field(min_length=10, max_length=1000)]
+
+
+class StrikeIn(BaseModel):
+    kind: Literal["strike", "warning", "takedown"]
+    note: Annotated[str, Field(min_length=10, max_length=1000)]
+    video_ref: Annotated[str | None, Field(max_length=200)] = None
+
+
+class StrikeOut(BaseModel):
+    id: int
 
 
 class ApproveIn(BaseModel):
@@ -714,12 +759,80 @@ def create_app(deps: HubDeps) -> FastAPI:
             raise HTTPException(409, str(exc)) from None
         return Ok()
 
+    @api.get("/tiers", tags=["tiers"], response_model=list[TierRowOut], dependencies=[read_limit])
+    async def tiers(ctx: Session) -> list[TierRowOut]:
+        rows = await asyncio.to_thread(deps.repo.tiers.overview)
+        return [TierRowOut(**r) for r in rows]
+
+    @api.get(
+        "/tiers/changes", tags=["tiers"], response_model=list[TierChangeOut],
+        dependencies=[read_limit],
+    )  # fmt: skip
+    async def tier_changes(
+        ctx: Session,
+        channel: str | None = None,
+        limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    ) -> list[TierChangeOut]:
+        rows = await asyncio.to_thread(deps.repo.tiers.changes, limit, channel)
+        return [TierChangeOut(**r) for r in rows]
+
+    @api.get(
+        "/tiers/report", tags=["tiers"], response_model=dict[str, Any], dependencies=[read_limit]
+    )
+    async def tier_report(ctx: Session, channel: str | None = None) -> dict[str, Any]:
+        return await asyncio.to_thread(deps.repo.tiers.disagreement, channel)
+
+    @api.post(
+        "/tiers/recommendations/{rid}/confirm", tags=["tiers"], response_model=Ok,
+        dependencies=[write_limit],
+    )  # fmt: skip
+    async def tier_confirm(rid: int, body: TierDecisionIn, ctx: Session) -> Ok:
+        admin = require_role(ctx, "admin")
+        try:
+            await asyncio.to_thread(deps.repo.tiers.confirm, rid, admin.username, body.note)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from None
+        except TierRefused as exc:
+            raise HTTPException(409, str(exc)) from None
+        return Ok()
+
+    @api.post(
+        "/tiers/recommendations/{rid}/dismiss", tags=["tiers"], response_model=Ok,
+        dependencies=[write_limit],
+    )  # fmt: skip
+    async def tier_dismiss(rid: int, body: TierDecisionIn, ctx: Session) -> Ok:
+        admin = require_role(ctx, "admin")
+        try:
+            await asyncio.to_thread(deps.repo.tiers.dismiss, rid, admin.username, body.note)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from None
+        except TierRefused as exc:
+            raise HTTPException(409, str(exc)) from None
+        return Ok()
+
+    @api.post(
+        "/channels/{channel}/strikes", tags=["tiers"], response_model=StrikeOut,
+        dependencies=[write_limit],
+    )  # fmt: skip
+    async def record_strike(channel: str, body: StrikeIn, ctx: Session) -> StrikeOut:
+        """Record a YouTube strike, warning or takedown. The channel returns to approve-all."""
+        admin = require_role(ctx, "admin")
+        try:
+            sid = await asyncio.to_thread(
+                deps.repo.tiers.record_strike, channel, body.kind, body.note,
+                video_ref=body.video_ref, actor=f"hub:{admin.username}",
+            )  # fmt: skip
+        except LookupError:
+            raise HTTPException(404, "channel not found") from None
+        return StrikeOut(id=sid)
+
     @api.get("/jobs/{job_id}", response_model=PreviewOut, dependencies=[read_limit])
     async def preview(job_id: str, ctx: Session) -> PreviewOut:
         head = await asyncio.to_thread(deps.repo.head, job_id)
         if head is None or head.manifest is None or head.content_hash is None:
             raise HTTPException(404, "job not found")
         qa = await asyncio.to_thread(deps.repo.qa, job_id)
+        lane = await asyncio.to_thread(deps.repo.lane_for, job_id)
         previous = (
             await asyncio.to_thread(deps.repo.manifest_version, job_id, head.manifest_version - 1)
             if head.manifest_version > 1
@@ -762,7 +875,9 @@ def create_app(deps: HubDeps) -> FastAPI:
             )
             if qa
             else None,
-            fast_lane=await asyncio.to_thread(deps.repo.is_fast_lane, job_id),
+            fast_lane=lane is not None and lane.lane == "fast",
+            lane=lane.lane if lane else "standard",
+            lane_reason=lane.reason if lane else "",
             previous=PreviousVersionOut(
                 version=head.manifest_version - 1, metadata=dict(previous.get("metadata", {}))
             )

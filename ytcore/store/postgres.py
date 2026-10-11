@@ -39,6 +39,7 @@ from ytcore.store.errors import (
     QuotaExhausted,
     RolloutRefused,
     StoreError,
+    TierRefused,
     UploadGuardError,
 )
 from ytcore.store.models import PublishContext, UploadRecord
@@ -56,6 +57,7 @@ _BY_SQLSTATE: dict[str, type[StoreError]] = {
     "YTU01": UploadGuardError,
     "YTD01": ApprovalGateError,
     "YTR01": RolloutRefused,
+    "YTT01": TierRefused,
 }
 _BY_MESSAGE: tuple[tuple[str, str, type[StoreError]], ...] = (
     ("23514", "illegal job transition", IllegalTransition),

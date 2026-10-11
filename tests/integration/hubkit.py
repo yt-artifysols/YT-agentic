@@ -38,7 +38,27 @@ class Hub:
     notifier: FakeNotifier
     assets: InMemoryAssetSource
     app: Any
+    conninfo: str = ""
     authenticators: dict[str, SoftAuthenticator] = field(default_factory=dict)
+
+    def promote(self, channel_id: str) -> None:
+        """Put a channel on the risk-based tier the legitimate way: an admin confirms."""
+        with psycopg.connect(self.conninfo, autocommit=True) as conn:
+            if (
+                conn.execute("SELECT 1 FROM hub_users WHERE username = 'tier-admin'").fetchone()
+                is None
+            ):
+                conn.execute(
+                    "INSERT INTO hub_users (username, display_name, role) "
+                    "VALUES ('tier-admin', 'Tier Admin', 'admin')"
+                )
+            rid = conn.execute(
+                "INSERT INTO tier_recommendations (channel_id, evidence) VALUES (%s, '{}') "
+                "RETURNING id",
+                (channel_id,),
+            ).fetchone()
+        assert rid is not None
+        self.repo.tiers.confirm(rid[0], "tier-admin", "promoted by the test fixture")
 
     def client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(
@@ -128,4 +148,10 @@ def build_hub(
             knowledge=PostgresKnowledge.from_conninfo(conninfo),
         )
     )
-    return Hub(settings, repo, store, keys, signaler, notifier, assets, app)
+    with psycopg.connect(conninfo, autocommit=True) as conn:  # deterministic: no spot checks
+        conn.execute(
+            "INSERT INTO tier_rules (singleton, rules) VALUES (true, "
+            "'{\"spot_check_percent\": 0}') ON CONFLICT (singleton) DO UPDATE SET rules = "
+            "EXCLUDED.rules"
+        )
+    return Hub(settings, repo, store, keys, signaler, notifier, assets, app, conninfo)

@@ -1181,6 +1181,19 @@
             "title": "Job Id",
             "type": "string"
           },
+          "lane": {
+            "enum": [
+              "standard",
+              "fast",
+              "deep"
+            ],
+            "title": "Lane",
+            "type": "string"
+          },
+          "lane_reason": {
+            "title": "Lane Reason",
+            "type": "string"
+          },
           "manifest_version": {
             "title": "Manifest Version",
             "type": "integer"
@@ -1268,6 +1281,8 @@
           "thumbnail_url",
           "qa",
           "fast_lane",
+          "lane",
+          "lane_reason",
           "previous"
         ],
         "title": "PreviewOut",
@@ -1378,6 +1393,19 @@
             "title": "Job Id",
             "type": "string"
           },
+          "lane": {
+            "enum": [
+              "standard",
+              "fast",
+              "deep"
+            ],
+            "title": "Lane",
+            "type": "string"
+          },
+          "lane_reason": {
+            "title": "Lane Reason",
+            "type": "string"
+          },
           "manifest_version": {
             "title": "Manifest Version",
             "type": "integer"
@@ -1425,7 +1453,9 @@
           "qa_passed",
           "flag_count",
           "approval_deadline",
-          "fast_lane"
+          "fast_lane",
+          "lane",
+          "lane_reason"
         ],
         "title": "QueueItemOut",
         "type": "object"
@@ -1614,6 +1644,245 @@
           "id"
         ],
         "title": "SignoffOut",
+        "type": "object"
+      },
+      "StrikeIn": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "strike",
+              "warning",
+              "takedown"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "note": {
+            "maxLength": 1000,
+            "minLength": 10,
+            "title": "Note",
+            "type": "string"
+          },
+          "video_ref": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video Ref"
+          }
+        },
+        "required": [
+          "kind",
+          "note"
+        ],
+        "title": "StrikeIn",
+        "type": "object"
+      },
+      "StrikeOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "StrikeOut",
+        "type": "object"
+      },
+      "TierChangeOut": {
+        "properties": {
+          "actor": {
+            "title": "Actor",
+            "type": "string"
+          },
+          "channel_id": {
+            "title": "Channel Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "evidence": {
+            "additionalProperties": true,
+            "title": "Evidence",
+            "type": "object"
+          },
+          "from_tier": {
+            "title": "From Tier",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "promotion",
+              "demotion"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "recommendation_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recommendation Id"
+          },
+          "to_tier": {
+            "title": "To Tier",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "channel_id",
+          "from_tier",
+          "to_tier",
+          "kind",
+          "reason",
+          "actor",
+          "evidence",
+          "recommendation_id",
+          "created_at"
+        ],
+        "title": "TierChangeOut",
+        "type": "object"
+      },
+      "TierDecisionIn": {
+        "properties": {
+          "note": {
+            "maxLength": 1000,
+            "minLength": 10,
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "note"
+        ],
+        "title": "TierDecisionIn",
+        "type": "object"
+      },
+      "TierRowOut": {
+        "properties": {
+          "channel_id": {
+            "title": "Channel Id",
+            "type": "string"
+          },
+          "cluster_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cluster Id"
+          },
+          "last_change_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Change At"
+          },
+          "last_change_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Change Kind"
+          },
+          "last_change_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Change Reason"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "recommendation_evidence": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recommendation Evidence"
+          },
+          "recommendation_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recommendation Id"
+          },
+          "tier": {
+            "title": "Tier",
+            "type": "integer"
+          },
+          "tier_since": {
+            "format": "date-time",
+            "title": "Tier Since",
+            "type": "string"
+          }
+        },
+        "required": [
+          "channel_id",
+          "name",
+          "cluster_id",
+          "tier",
+          "tier_since",
+          "last_change_kind",
+          "last_change_reason",
+          "last_change_at",
+          "recommendation_id",
+          "recommendation_evidence"
+        ],
+        "title": "TierRowOut",
         "type": "object"
       },
       "ValidationError": {
@@ -2196,6 +2465,60 @@
         "summary": "Knowledge Propose",
         "tags": [
           "knowledge"
+        ]
+      }
+    },
+    "/api/channels/{channel}/strikes": {
+      "post": {
+        "description": "Record a YouTube strike, warning or takedown. The channel returns to approve-all.",
+        "operationId": "record_strike_api_channels__channel__strikes_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "channel",
+            "required": true,
+            "schema": {
+              "title": "Channel",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StrikeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrikeOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record Strike",
+        "tags": [
+          "approvals",
+          "tiers"
         ]
       }
     },
@@ -3216,6 +3539,256 @@
         "tags": [
           "approvals",
           "scale"
+        ]
+      }
+    },
+    "/api/tiers": {
+      "get": {
+        "operationId": "tiers_api_tiers_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TierRowOut"
+                  },
+                  "title": "Response Tiers Api Tiers Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Tiers",
+        "tags": [
+          "approvals",
+          "tiers"
+        ]
+      }
+    },
+    "/api/tiers/changes": {
+      "get": {
+        "operationId": "tier_changes_api_tiers_changes_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Channel"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TierChangeOut"
+                  },
+                  "title": "Response Tier Changes Api Tiers Changes Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Tier Changes",
+        "tags": [
+          "approvals",
+          "tiers"
+        ]
+      }
+    },
+    "/api/tiers/recommendations/{rid}/confirm": {
+      "post": {
+        "operationId": "tier_confirm_api_tiers_recommendations__rid__confirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rid",
+            "required": true,
+            "schema": {
+              "title": "Rid",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TierDecisionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Tier Confirm",
+        "tags": [
+          "approvals",
+          "tiers"
+        ]
+      }
+    },
+    "/api/tiers/recommendations/{rid}/dismiss": {
+      "post": {
+        "operationId": "tier_dismiss_api_tiers_recommendations__rid__dismiss_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rid",
+            "required": true,
+            "schema": {
+              "title": "Rid",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TierDecisionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Tier Dismiss",
+        "tags": [
+          "approvals",
+          "tiers"
+        ]
+      }
+    },
+    "/api/tiers/report": {
+      "get": {
+        "operationId": "tier_report_api_tiers_report_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Channel"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Tier Report Api Tiers Report Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Tier Report",
+        "tags": [
+          "approvals",
+          "tiers"
         ]
       }
     }

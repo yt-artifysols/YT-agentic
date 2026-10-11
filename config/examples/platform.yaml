@@ -10,3 +10,22 @@ targets:
   max_cost_per_video_cents: 100
   max_approval_queue_depth: 25
   max_sim_day_seconds: 120
+tiers:
+  # Approval tiers. Tier 1 = approve-all (default). Tier 2 = risk-based: low-risk videos go to a
+  # one-tap fast lane (still one human-issued token each), the rest get deep review.
+  # Promotion is only ever a RECOMMENDATION that an admin confirms in the hub.
+  spot_check_percent: 10        # share of low-risk tier-2 videos sent to deep review anyway
+  promotion:
+    min_days: 30
+    min_decisions: 20
+    max_rejection_rate: 0.10
+    max_edit_rate: 0.25
+    max_avg_risk: 35
+    max_cost_per_video_cents: 100
+    strike_free_days: 90
+    max_policy_flags: 0
+  demotion:                     # any one returns the channel to tier 1 at once
+    window_decisions: 10
+    max_rejections_in_window: 3
+    policy_flag_window_days: 14
+    max_policy_flags: 0

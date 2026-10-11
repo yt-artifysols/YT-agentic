@@ -10,6 +10,8 @@
     ytctl channel validate | list | apply [--dry-run]
     ytctl channel onboard SLUG [--dry-run-jobs 3]   (apply, checklist, OAuth steps, shadow dry run)
     ytctl rollout status | gate CLUSTER             (sign-off and enabling happen in the hub)
+    ytctl tier status | evaluate | report [--channel C]   (an admin confirms promotions in the hub)
+    ytctl tier strike CHANNEL --kind strike --note "..." [--video-ref ID]   (demotes to approve-all)
     ytctl ops stuck | pending-uploads | plans
     ytctl ops adopt-upload --upload ID --video-id VIDEO      (after checking YouTube Studio)
     ytctl ops release-upload --upload ID --reason "no video exists on YouTube, checked ..."
@@ -93,6 +95,17 @@ def _parser() -> argparse.ArgumentParser:
     gate = roll.add_parser("gate")
     gate.add_argument("cluster")
 
+    tier = sub.add_parser("tier", help="approval tiers").add_subparsers(dest="cmd", required=True)
+    tier.add_parser("status")
+    tier.add_parser("evaluate", help="demote risky channels, recommend promotions")
+    rep = tier.add_parser("report", help="risk-score vs human decision disagreement")
+    rep.add_argument("--channel")
+    strike = tier.add_parser("strike", help="record a YouTube strike/warning/takedown")
+    strike.add_argument("channel")
+    strike.add_argument("--kind", choices=["strike", "warning", "takedown"], default="strike")
+    strike.add_argument("--note", required=True)
+    strike.add_argument("--video-ref")
+
     ops = sub.add_parser("ops", help="operations (see docs/runbooks)").add_subparsers(
         dest="cmd", required=True
     )
@@ -175,6 +188,38 @@ def _rollout(args: argparse.Namespace) -> int:
     report = svc.gate(args.cluster)
     print(json.dumps(report.to_json(), indent=2, default=str))
     return 0 if report.ok else 1
+
+
+def _tier(args: argparse.Namespace, who: str) -> int:
+    from ytcore.tiers.service import TierService
+
+    svc = TierService.from_conninfo(_conninfo())
+    operator = who.removeprefix("cli:")
+    if args.cmd == "status":
+        for r in svc.overview():
+            pending = (
+                f"  recommendation #{r['recommendation_id']} awaits an admin"
+                if r["recommendation_id"]
+                else ""
+            )
+            print(
+                f"{r['channel_id']:<28} tier {r['tier']}  since {r['tier_since']:%Y-%m-%d}{pending}"
+            )
+        return 0
+    if args.cmd == "evaluate":
+        for d in svc.evaluate_demotions():
+            print(f"demoted {d.channel_id}: {d.reason}")
+        for rec in svc.evaluate_promotions():
+            print(f"recommended {rec.channel_id} (id {rec.id}); an admin confirms in the hub")
+        return 0
+    if args.cmd == "report":
+        print(json.dumps(svc.disagreement(args.channel), indent=2, default=str))
+        return 0
+    sid = svc.record_strike(
+        args.channel, args.kind, args.note, video_ref=args.video_ref, actor=f"operator:{operator}"
+    )
+    print(f"{args.kind} {sid} recorded; {args.channel} is back on approve-all")
+    return 0
 
 
 def _ops(args: argparse.Namespace, who: str) -> int:
@@ -262,6 +307,8 @@ def main(
             return _channel(args)
         if args.area == "rollout":
             return _rollout(args)
+        if args.area == "tier":
+            return _tier(args, who)
 
         base = knowledge or PostgresKnowledge.from_conninfo(_conninfo())
         chan = base.channel(args.channel)

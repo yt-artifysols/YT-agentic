@@ -3,6 +3,8 @@
 Treat any strike, warning, demonetisation notice or takedown as a **channel incident**.
 
 ## Contain (within the hour)
+0. Record it: `ytctl tier strike CHANNEL --note "..."`. The channel returns to approve-all at once
+   and cannot be promoted again for 90 days ([approval-tiers.md](approval-tiers.md)).
 1. Pause the **channel** ([kill-switch.md](kill-switch.md)); pause the **cluster** if the notice
    names a pattern that other channels in it share (reused media, a template, a topic).
 2. Cancel its scheduled/awaiting jobs by letting deadlines pass or signalling `kill`; do not
@@ -26,7 +28,7 @@ Treat any strike, warning, demonetisation notice or takedown as a **channel inci
 
 ## Resume
 9. Resume only when the owner agrees. Run the first videos with **approve-all** scrutiny
-   (nothing fast-laned) for a week. Record the incident: date, video, policy, root cause,
+   (tier 1: nothing fast-laned) for a week. Record the incident: date, video, policy, root cause,
    changes made.
 
 Three strikes lead to termination: after the second, stop publishing on the channel until the

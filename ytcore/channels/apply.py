@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import psycopg
+from psycopg.types.json import Jsonb
 
 from ytcore.channels.config import ChannelCfg, ClusterCfg, ConfigError, FleetCfg
 from ytcore.knowledge.models import KnowledgeKind
@@ -86,6 +87,12 @@ def _apply_sql(conn: psycopg.Connection[Any], fleet: FleetCfg, report: ApplyRepo
                 (p.id, p.daily_quota_units, p.oauth_client_ref),
             )
             report.projects[p.id] = _state(before, (p.daily_quota_units, p.oauth_client_ref))
+    conn.execute(
+        "INSERT INTO tier_rules (singleton, rules) VALUES (true, %s) "
+        "ON CONFLICT (singleton) DO UPDATE SET rules = EXCLUDED.rules, updated_at = now() "
+        "WHERE tier_rules.rules IS DISTINCT FROM EXCLUDED.rules",
+        (Jsonb(fleet.platform.tiers.to_json()),),
+    )
     # Clusters in dependency order, so a required cluster exists first.
     report.pools += _pools(conn, "global", "", {str(k): v for k, v in fleet.platform.pools.items()})
     for cluster in _in_order(fleet.clusters):

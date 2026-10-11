@@ -17,7 +17,7 @@ from datetime import timedelta
 from typing import Any, Literal, Protocol
 
 from ytcore.approvals.service.notify import Notification, Notifier
-from ytcore.approvals.service.repo import HubConflict, HubRepository, User
+from ytcore.approvals.service.repo import HubConflict, HubRepository, LaneInfo, User
 from ytcore.approvals.service.signals import WorkflowSignaler
 from ytcore.approvals.token import ApprovalClaims, ApprovalSigner
 from ytcore.observability.tracing import job_span
@@ -115,16 +115,24 @@ class ApprovalHub:
                 "decision recorded but the workflow could not be signalled; retry later"
             ) from exc
 
-    async def approve(self, job_id: str, expected_hash: str, user: User) -> ApproveResult:
+    async def approve(
+        self, job_id: str, expected_hash: str, user: User, *, require_lane: str | None = None
+    ) -> ApproveResult:
         with job_span("hub.approve", job_id):
-            return await self._approve(job_id, expected_hash, user)
+            return await self._approve(job_id, expected_hash, user, require_lane)
 
-    async def _approve(self, job_id: str, expected_hash: str, user: User) -> ApproveResult:
+    async def _approve(
+        self, job_id: str, expected_hash: str, user: User, require_lane: str | None = None
+    ) -> ApproveResult:
         head = await asyncio.to_thread(self._repo.head, job_id)
         if head is None:
             raise HubNotFound("job not found")
         if head.state != "awaiting_approval" or head.content_hash != expected_hash:
             raise HubStale("content changed since the preview was loaded; reload and review again")
+        lane = await asyncio.to_thread(self._repo.lane_for, job_id)
+        if require_lane is not None and (lane is None or lane.lane != require_lane):
+            # e.g. the channel was demoted after the reviewer loaded the fast lane
+            raise HubStale(f"no longer in the {require_lane} lane; review it individually")
         token, claims = self._signer.issue(
             job_id=job_id,
             channel_id=head.channel_id,
@@ -144,6 +152,7 @@ class ApprovalHub:
             ) from exc
         except (ApprovalInvalid, ApprovalGateError, ApprovalReplayError) as exc:
             raise HubStale(f"approval refused: {exc}") from exc
+        await self._outcome(lane, expected_hash, "approved", user)
         await asyncio.to_thread(
             self._repo.audit,
             f"hub:{user.username}",
@@ -156,12 +165,29 @@ class ApprovalHub:
         )
         return ApproveResult(job_id, expected_hash, claims.jti, user.username)
 
+    async def _outcome(
+        self, lane: LaneInfo | None, content_hash: str, decision: str, user: User
+    ) -> None:
+        """Record the human decision next to the predicted lane (recalibration input). A failure
+        here must never undo or block a decision that is already made."""
+        if lane is None:
+            return
+        try:
+            await asyncio.to_thread(
+                self._repo.record_outcome, lane, content_hash, decision, user.username
+            )
+            # A rejection spike or a policy flag returns the channel to approve-all right away.
+            await asyncio.to_thread(self._repo.tiers.demote_if_needed, lane.channel_id)
+        except Exception as exc:
+            log.error("could not record review outcome for %s: %s", lane.job_id, type(exc).__name__)
+
     async def edit(
         self, job_id: str, expected_hash: str, changes: dict[str, Any], user: User
     ) -> EditResult:
         unknown = set(changes) - EDITABLE_FIELDS
         if unknown or not changes:
             raise HubError(f"editable fields are {sorted(EDITABLE_FIELDS)}")
+        lane = await asyncio.to_thread(self._repo.lane_for, job_id)
         try:
             new_hash, version = await asyncio.to_thread(
                 self._repo.apply_edit,
@@ -172,6 +198,7 @@ class ApprovalHub:
             )
         except HubConflict as exc:
             raise HubStale(str(exc)) from exc
+        await self._outcome(lane, expected_hash, "edited", user)
         await self._signal(job_id, HubDecision("edit", user.username, new_hash))
         return EditResult(job_id, new_hash, version)
 
@@ -182,6 +209,7 @@ class ApprovalHub:
             raise HubError(f"rework_stage must be one of {sorted(REWORK_STAGES)}")
         if len(reason.strip()) < 10:
             raise HubError("a rejection needs a reason of at least 10 characters")
+        lane = await asyncio.to_thread(self._repo.lane_for, job_id)
         try:
             await asyncio.to_thread(
                 self._repo.record_rejection,
@@ -193,6 +221,7 @@ class ApprovalHub:
             )
         except HubConflict as exc:
             raise HubStale(str(exc)) from exc
+        await self._outcome(lane, expected_hash, "rejected", user)
         await self._signal(
             job_id,
             HubDecision(
@@ -212,7 +241,7 @@ class ApprovalHub:
                 results.append(BatchItemResult(job_id, False, error="not eligible for fast lane"))
                 continue
             try:
-                res = await self.approve(job_id, expected_hash, user)
+                res = await self.approve(job_id, expected_hash, user, require_lane="fast")
             except HubError as exc:
                 results.append(BatchItemResult(job_id, False, error=str(exc)))
             else:

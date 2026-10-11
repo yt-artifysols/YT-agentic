@@ -87,6 +87,15 @@ PHASES = [
         "slot allocator, hub cluster and scorecard views, a DB-enforced rollout gate so cluster B "
         "cannot go live before cluster A, and a 20-channel x 7-day fault-injected simulation.",
     ),
+    (
+        "Phase 6",
+        "Autonomy tiers (risk-based approval)",
+        "done",
+        "Approve-all and risk-based tiers per channel: one-tap fast lane for low-risk videos "
+        "(still one human token each), deep review for the rest plus spot checks, admin-confirmed "
+        "promotion, automatic demotion on strikes or rejection spikes, and a tier decision "
+        "dashboard. No tier can bypass the approval token or the gateway.",
+    ),
 ]
 
 INVARIANTS = [

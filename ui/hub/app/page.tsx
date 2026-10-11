@@ -116,7 +116,8 @@ export default function QueuePage() {
                 </td>
                 <td><RiskBadge risk={item.risk_score} /></td>
                 <td><Link href={`/jobs/${item.job_id}`}>{item.title || item.job_id}</Link>
-                  {item.fast_lane && <span className="badge risk-low" style={{ marginLeft: 6 }}>fast lane</span>}</td>
+                  {item.fast_lane && <span className="badge risk-low" style={{ marginLeft: 6 }} title={item.lane_reason}>fast lane</span>}
+                  {item.lane === "deep" && <span className="badge risk-high" style={{ marginLeft: 6 }} title={item.lane_reason}>deep review</span>}</td>
                 <td className="mono">{item.channel_id}</td>
                 <td>{item.origin}</td>
                 <td>{item.flag_count}</td>

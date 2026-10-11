@@ -126,6 +126,7 @@ async def test_strict_auth_limit_does_not_lock_out_signed_in_pages(hub: Hub) -> 
 
 async def test_queue_preview_and_approve(hub: Hub, channel: Callable[..., str], sql: SQL) -> None:
     ch = channel()
+    hub.promote(ch)
     low, low_hash = hub.awaiting_job(ch, risk=5)
     high, _ = hub.awaiting_job(ch, risk=80, flags=2)
     async with hub.client() as c:
@@ -233,6 +234,7 @@ async def test_batch_approve_fast_lane_only_with_per_video_hash_check(
     hub: Hub, channel: Callable[..., str], sql: SQL
 ) -> None:
     ch = channel()
+    hub.promote(ch)
     a, ha = hub.awaiting_job(ch, risk=5)
     b, hb = hub.awaiting_job(ch, risk=8)
     risky, hr = hub.awaiting_job(ch, risk=70)
@@ -261,7 +263,9 @@ async def test_batch_approve_fast_lane_only_with_per_video_hash_check(
 async def test_fast_lane_needs_qa_for_the_current_content(
     hub: Hub, channel: Callable[..., str], sql: SQL
 ) -> None:
-    job, h = hub.awaiting_job(channel(), risk=5)
+    ch = channel()
+    hub.promote(ch)
+    job, h = hub.awaiting_job(ch, risk=5)
     assert hub.repo.is_fast_lane(job)
     sql("INSERT INTO qa_reports (job_id, content_hash, passed, risk_score) "
         "VALUES (%s, %s, true, 1)", job, "sha256:" + "e" * 64)  # fmt: skip
