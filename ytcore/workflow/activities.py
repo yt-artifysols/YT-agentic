@@ -209,9 +209,14 @@ class JobActivities:
         channel_id: str,
         artifacts: dict[str, str],
         approval_timeout_seconds: int = 48 * 3600,
+        approval_deadline_epoch: float | None = None,
     ) -> str:
         """Freeze the publish package and submit it for human approval."""
-        deadline = datetime.now(UTC) + timedelta(seconds=approval_timeout_seconds)
+        deadline = (
+            datetime.fromtimestamp(approval_deadline_epoch, tz=UTC)
+            if approval_deadline_epoch is not None
+            else datetime.now(UTC) + timedelta(seconds=approval_timeout_seconds)
+        )
         if self._production is not None:
             built = await self._produce(
                 self._production.build_manifest, job_id, channel_id, dict(artifacts)

@@ -66,8 +66,15 @@ BEGIN
     IF TG_OP = 'UPDATE' THEN
         IF NEW.channel_id <> OLD.channel_id OR NEW.plan_date <> OLD.plan_date
            OR NEW.attempt <> OLD.attempt OR NEW.job_id <> OLD.job_id
-           OR NEW.slot_at <> OLD.slot_at OR NEW.budget_cents <> OLD.budget_cents THEN
-            RAISE EXCEPTION 'a plan''s channel, day, job, slot and budget are immutable'
+           OR NEW.slot_at <> OLD.slot_at OR NEW.slot_date <> OLD.slot_date
+           OR NEW.approval_deadline <> OLD.approval_deadline
+           OR NEW.budget_cents <> OLD.budget_cents THEN
+            RAISE EXCEPTION 'a plan''s channel, day, job, slot, deadline and budget are immutable'
+                USING ERRCODE = 'insufficient_privilege';
+        END IF;
+        -- Plans only move forward: replanned and exhausted are final.
+        IF OLD.status IN ('replanned', 'exhausted') AND NEW.status <> OLD.status THEN
+            RAISE EXCEPTION 'plan status % is final', OLD.status
                 USING ERRCODE = 'insufficient_privilege';
         END IF;
         NEW.updated_at := now();
@@ -90,6 +97,23 @@ CREATE TRIGGER daily_plans_no_delete BEFORE DELETE ON daily_plans
     FOR EACH ROW EXECUTE FUNCTION forbid_mutation();
 CREATE TRIGGER daily_plans_no_truncate BEFORE TRUNCATE ON daily_plans
     FOR EACH STATEMENT EXECUTE FUNCTION forbid_mutation();
+
+-- A late approval must never publish at an odd time: once a job's approval deadline has passed,
+-- the database refuses new approvals for it (the workflow cancels and re-plans it).
+CREATE FUNCTION approvals_deadline_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+    deadline timestamptz;
+BEGIN
+    SELECT approval_deadline INTO deadline FROM video_jobs WHERE id = NEW.job_id;
+    IF deadline IS NOT NULL AND now() > deadline THEN
+        RAISE EXCEPTION 'approval deadline has passed for job %', NEW.job_id
+            USING ERRCODE = 'YTD01';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER approvals_deadline_guard BEFORE INSERT ON approvals
+    FOR EACH ROW EXECUTE FUNCTION approvals_deadline_guard();
 
 -- ---------------------------------------------------------------- analytics
 
@@ -158,5 +182,13 @@ CREATE TABLE daily_scorecards (
 );
 CREATE TRIGGER daily_scorecards_no_delete BEFORE DELETE ON daily_scorecards
     FOR EACH ROW EXECUTE FUNCTION forbid_mutation();
+CREATE TRIGGER daily_scorecards_no_truncate BEFORE TRUNCATE ON daily_scorecards
+    FOR EACH STATEMENT EXECUTE FUNCTION forbid_mutation();
+CREATE TRIGGER video_metrics_no_truncate BEFORE TRUNCATE ON video_metrics
+    FOR EACH STATEMENT EXECUTE FUNCTION forbid_mutation();
+CREATE TRIGGER performance_notes_no_delete BEFORE DELETE OR UPDATE ON performance_notes
+    FOR EACH ROW EXECUTE FUNCTION forbid_mutation();
+CREATE TRIGGER performance_notes_no_truncate BEFORE TRUNCATE ON performance_notes
+    FOR EACH STATEMENT EXECUTE FUNCTION forbid_mutation();
 
 COMMIT;

@@ -53,6 +53,7 @@ _BY_SQLSTATE: dict[str, type[StoreError]] = {
     "YTQ01": QuotaExhausted,
     "YTC01": ChannelNotPublishable,
     "YTU01": UploadGuardError,
+    "YTD01": ApprovalGateError,
 }
 _BY_MESSAGE: tuple[tuple[str, str, type[StoreError]], ...] = (
     ("23514", "illegal job transition", IllegalTransition),

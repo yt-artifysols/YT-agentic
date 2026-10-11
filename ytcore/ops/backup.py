@@ -53,6 +53,22 @@ def _tool(name: str) -> str:
     return path
 
 
+def _pg_connection(conninfo: str) -> tuple[list[str], dict[str, str]]:
+    """libpq arguments for pg_dump/pg_restore built from a conninfo or URI, with the password
+    (and other secrets) in the ENVIRONMENT, never on the command line."""
+    parts = psycopg.conninfo.conninfo_to_dict(conninfo)
+    args: list[str] = []
+    for key, flag in (("host", "-h"), ("port", "-p"), ("user", "-U")):
+        if parts.get(key):
+            args += [flag, str(parts[key])]
+    env: dict[str, str] = {}
+    if parts.get("password"):
+        env["PGPASSWORD"] = str(parts["password"])
+    if parts.get("sslmode"):
+        env["PGSSLMODE"] = str(parts["sslmode"])
+    return [*args, "-d", str(parts.get("dbname") or "postgres")], env
+
+
 def _run(cmd: list[str], env: dict[str, str] | None = None) -> None:
     result = subprocess.run(  # noqa: S603
         cmd, capture_output=True, text=True, check=False, env={**os.environ, **(env or {})}
@@ -129,7 +145,11 @@ def backup_postgres(conninfo: str, out_dir: Path) -> dict[str, Any]:
     if not before.audit_chain_intact:
         raise BackupError("the audit chain is broken: refusing to back up a tampered database")
     dump = out_dir / DUMP_NAME
-    _run([_tool("pg_dump"), "-Fc", "--no-owner", "--no-acl", "-d", conninfo, "-f", str(dump)])
+    conn_args, conn_env = _pg_connection(conninfo)
+    _run(
+        [_tool("pg_dump"), "-Fc", "--no-owner", "--no-acl", *conn_args, "-f", str(dump)],
+        conn_env,
+    )
     manifest = {
         "created_at": datetime.now(UTC).isoformat(),
         "dump": DUMP_NAME,
@@ -278,6 +298,14 @@ def restore_drill(
     )
 
 
+def _conninfo_from_secrets() -> str:  # pragma: no cover - needs configured secrets
+    from ytcore.config import build_secrets_provider, load_settings
+    from ytcore.secrets.provider import SecretRef
+
+    core = load_settings()
+    return build_secrets_provider(core).get(SecretRef(core.database_url_ref)).reveal()
+
+
 def _upload(directory: Path, bucket: str) -> None:  # pragma: no cover - needs a real bucket
     """Copy the backup files under backups/<UTC timestamp>/ in the backups bucket."""
     from ytcore.gateway.assets import GcsAssetSource
@@ -298,7 +326,7 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI
     parser.add_argument("--assets-dir", type=Path, help="local asset store to back up / verify")
     parser.add_argument("--bucket", help="also upload the backup to this (backups) bucket")
     args = parser.parse_args(argv)
-    conninfo = os.environ.get("BACKUP_CONNINFO", "")  # libpq env vars supply the credentials
+    conninfo = os.environ.get("BACKUP_CONNINFO") or _conninfo_from_secrets()
     if args.cmd == "backup":
         manifest = backup_postgres(conninfo, args.dir)
         print(f"postgres backup ok: {manifest['dump_bytes']} bytes")
@@ -315,8 +343,9 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI
     from ytcore.gateway.assets import LocalDirAssetSource
 
     has_storage = (args.dir / STORAGE_MANIFEST).exists()
+    admin = psycopg.conninfo.make_conninfo(conninfo, dbname="postgres")
     drill = restore_drill(
-        conninfo,
+        admin,
         args.dir,
         backup_assets=LocalDirAssetSource(args.dir / "storage") if has_storage else None,
         scratch_assets=LocalDirAssetSource(args.dir / "restored") if has_storage else None,

@@ -176,11 +176,17 @@ def test_unstarted_plans_are_healed_on_the_next_run(
     class Flaky(FakeWorkflowStarter):
         calls = 0
 
-        def start(self, job_id: str, channel_id: str, approval_timeout_seconds: int) -> None:
+        def start(
+            self,
+            job_id: str,
+            channel_id: str,
+            approval_timeout_seconds: int,
+            approval_deadline: Any = None,
+        ) -> None:
             Flaky.calls += 1
             if Flaky.calls == 1:
                 raise RuntimeError("temporal down")
-            super().start(job_id, channel_id, approval_timeout_seconds)
+            super().start(job_id, channel_id, approval_timeout_seconds, approval_deadline)
 
     starter = Flaky()
     planner = DailyPlanner(repo, starter)

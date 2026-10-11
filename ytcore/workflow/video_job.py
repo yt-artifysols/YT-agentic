@@ -9,7 +9,7 @@ approval before the deadline the job is cancelled and a re-plan is requested.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
@@ -162,6 +162,12 @@ class VideoJobWorkflow:
                 await self._to(inp, JobState.SCRIPTING)
                 self._artifacts.update(await self._stage(inp, "script"))
 
+    @staticmethod
+    def _deadline(inp: VideoJobInput) -> datetime:
+        if inp.approval_deadline_epoch is not None:
+            return datetime.fromtimestamp(inp.approval_deadline_epoch, tz=UTC)
+        return workflow.now() + timedelta(seconds=inp.approval_timeout_seconds)
+
     async def _deadline_missed(self, inp: VideoJobInput, chash: str) -> VideoJobResult:
         # Missed deadline: never auto-publish. Cancel and re-plan.
         result = await self._end(
@@ -180,7 +186,7 @@ class VideoJobWorkflow:
     ) -> str | _Rework | VideoJobResult:
         """Return a consumed approval token, a rework request, or the job's final result."""
         self._chash = chash
-        deadline = workflow.now() + timedelta(seconds=inp.approval_timeout_seconds)
+        deadline = self._deadline(inp)
         while True:
             remaining = deadline - workflow.now()
             try:
@@ -258,9 +264,19 @@ class VideoJobWorkflow:
 
             if (stopped := await self._killed(inp)) is not None:
                 return stopped
+            if inp.approval_deadline_epoch is not None and workflow.now() >= self._deadline(inp):
+                # Production overran the planned deadline: never seal a package that cannot be
+                # approved in time. Cancel and re-plan.
+                return await self._deadline_missed(inp, "")
             chash = await workflow.execute_activity_method(
                 JobActivities.seal_package,
-                args=[inp.job_id, inp.channel_id, produced, inp.approval_timeout_seconds],
+                args=[
+                    inp.job_id,
+                    inp.channel_id,
+                    produced,
+                    inp.approval_timeout_seconds,
+                    inp.approval_deadline_epoch,
+                ],
                 start_to_close_timeout=_TIMEOUT,
                 retry_policy=_RETRY,
             )

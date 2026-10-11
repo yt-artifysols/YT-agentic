@@ -9,6 +9,7 @@ under the operator's name.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -42,8 +43,8 @@ def pending_uploads(connect: Connect) -> list[PendingUpload]:
 def adopt_upload(store: PostgresStore, upload_id: str, video_id: str, *, operator: str) -> None:
     """The video exists on YouTube: record it (job -> published). The gateway's next publish
     returns this upload as a duplicate instead of uploading again."""
-    if not video_id.strip():
-        raise ValueError("a video id is required")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{6,64}", video_id.strip()):
+        raise ValueError("a YouTube video id (letters, digits, - and _) is required")
     store.complete_upload(upload_id, video_id.strip(), actor=f"operator:{operator}")
 
 

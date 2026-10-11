@@ -135,7 +135,13 @@ class GcsAssetSource:  # pragma: no cover - needs a real bucket (`gcp` extra)
         return bytes(blob.download_as_bytes())
 
     def write_raw(self, key: str, data: bytes) -> None:
-        self._bucket.blob(key).upload_from_string(data, if_generation_match=None)
+        from google.api_core.exceptions import PreconditionFailed
+
+        try:  # create-only: an existing object is never overwritten
+            self._bucket.blob(key).upload_from_string(data, if_generation_match=0)
+        except PreconditionFailed:
+            if self.read(key) != data:
+                raise AssetIntegrityError(f"{key} already exists with different bytes") from None
 
     def list_keys(self, prefix: str = "") -> list[str]:
         return sorted(b.name for b in self._bucket.list_blobs(prefix=prefix))

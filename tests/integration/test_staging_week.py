@@ -187,7 +187,9 @@ async def test_a_simulated_week_of_daily_planning_leaves_no_stuck_jobs_and_a_res
     )
     handles: dict[str, WorkflowHandle[Any, Any]] = {}
     approved_at_attempt1: dict[tuple[int, int], str] = {}
-    base = datetime(2026, 5, 4, 6, 0, tzinfo=UTC)
+    # Simulated days start now: deadlines are absolute, and Temporal's clock starts at real now.
+    base = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
+    deadlines: dict[str, datetime] = {}
 
     async with (
         await WorkflowEnvironment.start_time_skipping() as env,
@@ -234,6 +236,7 @@ async def test_a_simulated_week_of_daily_planning_leaves_no_stuck_jobs_and_a_res
                     workflow_id_for(job), result_type=VideoJobResult
                 )
             planned = run.planned + run.replanned
+            deadlines.update({p.job_id: p.slot.approval_deadline for p in planned})
             today = [
                 PlannedKey(p.job_id, p.channel_id, p.attempt)
                 for p in planned
@@ -260,8 +263,9 @@ async def test_a_simulated_week_of_daily_planning_leaves_no_stuck_jobs_and_a_res
             for job in to_finish:
                 res = await finish(job)
                 assert res.final_state in {"live", "rejected"}, res
-            if to_miss:  # nobody approves: skip past the approval deadline
-                await env.sleep(timedelta(days=2))
+            if to_miss:  # nobody approves: move Temporal's clock just past the latest deadline
+                target = max(deadlines[j] for j in to_miss) + timedelta(minutes=1)
+                await env.sleep(max(target - await env.get_current_time(), timedelta(seconds=1)))
             for job in to_miss:
                 res = await asyncio.wait_for(handles[job].result(), 120)
                 assert res.final_state == "cancelled" and res.replanned, res

@@ -4,6 +4,7 @@ job id, so starting twice (or after a crash) never creates a second run."""
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 
 from temporalio.client import Client
 from temporalio.common import WorkflowIDReusePolicy
@@ -22,13 +23,21 @@ class TemporalStarter:
     def __init__(self, client: Client, loop: asyncio.AbstractEventLoop, task_queue: str) -> None:
         self._client, self._loop, self._queue = client, loop, task_queue
 
-    def start(self, job_id: str, channel_id: str, approval_timeout_seconds: int) -> None:
+    def start(
+        self,
+        job_id: str,
+        channel_id: str,
+        approval_timeout_seconds: int,
+        approval_deadline: datetime | None = None,
+    ) -> None:
         future = asyncio.run_coroutine_threadsafe(
-            self._start(job_id, channel_id, approval_timeout_seconds), self._loop
+            self._start(job_id, channel_id, approval_timeout_seconds, approval_deadline), self._loop
         )
         future.result(timeout=60)
 
-    async def _start(self, job_id: str, channel_id: str, timeout_s: int) -> None:
+    async def _start(
+        self, job_id: str, channel_id: str, timeout_s: int, deadline: datetime | None
+    ) -> None:
         try:
             await self._client.start_workflow(
                 VideoJobWorkflow.run,
@@ -37,6 +46,7 @@ class TemporalStarter:
                     channel_id=channel_id,
                     origin="planner",
                     approval_timeout_seconds=timeout_s,
+                    approval_deadline_epoch=deadline.timestamp() if deadline else None,
                 ),
                 id=workflow_id_for(job_id),
                 task_queue=self._queue,

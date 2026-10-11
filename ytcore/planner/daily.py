@@ -24,6 +24,7 @@ from zoneinfo import ZoneInfo
 
 import psycopg
 
+from ytcore.store.errors import StoreError
 from ytcore.store.postgres import Connect, map_db_error
 
 log = logging.getLogger(__name__)
@@ -97,8 +98,15 @@ class PlanRun:
 
 
 class WorkflowStarter(Protocol):
-    def start(self, job_id: str, channel_id: str, approval_timeout_seconds: int) -> None:
-        """Start the job's workflow. Must be idempotent for a job id that already runs."""
+    def start(
+        self,
+        job_id: str,
+        channel_id: str,
+        approval_timeout_seconds: int,
+        approval_deadline: datetime | None = None,
+    ) -> None:
+        """Start the job's workflow with its ABSOLUTE approval deadline. Must be idempotent for
+        a job id that already runs."""
         ...
 
 
@@ -109,7 +117,13 @@ class FakeWorkflowStarter:
     def __init__(self) -> None:
         self.started = []
 
-    def start(self, job_id: str, channel_id: str, approval_timeout_seconds: int) -> None:
+    def start(
+        self,
+        job_id: str,
+        channel_id: str,
+        approval_timeout_seconds: int,
+        approval_deadline: datetime | None = None,
+    ) -> None:
         if all(j != job_id for j, _, _ in self.started):
             self.started.append((job_id, channel_id, approval_timeout_seconds))
 
@@ -318,7 +332,11 @@ class DailyPlanner:
             if slot.approval_deadline <= now:
                 run.skipped.append(Skipped(s.channel_id, "approval deadline already passed"))
                 continue
-            made = self._repo.create_plan(s, day, 1, slot, self._budget(s))
+            try:
+                made = self._repo.create_plan(s, day, 1, slot, self._budget(s))
+            except StoreError:  # lost a race with a replan for this day: next run sorts it out
+                run.skipped.append(Skipped(s.channel_id, "plan conflict, retried next run"))
+                continue
             if made is None:
                 run.skipped.append(Skipped(s.channel_id, "slot day taken by a replanned job"))
                 continue
@@ -349,7 +367,10 @@ class DailyPlanner:
             ):
                 day += timedelta(days=1)
                 slot = compute_slot(s, day)
-            made = self._repo.create_plan(s, plan_date, attempt + 1, slot, self._budget(s))
+            try:
+                made = self._repo.create_plan(s, plan_date, attempt + 1, slot, self._budget(s))
+            except StoreError:
+                continue
             if made is None:  # lost a race for the day: try again on the next run
                 continue
             new_id, job_id, created = made
@@ -360,6 +381,6 @@ class DailyPlanner:
 
     def _start_pending(self, run: PlanRun, now: datetime) -> None:
         for plan_id, job_id, channel_id, deadline in self._repo.unstarted():
-            self._starter.start(job_id, channel_id, self._timeout(deadline, now))
+            self._starter.start(job_id, channel_id, self._timeout(deadline, now), deadline)
             self._repo.mark_started(plan_id)
             run.started.append(job_id)

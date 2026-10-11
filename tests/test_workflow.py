@@ -369,3 +369,63 @@ async def test_a_buffered_decision_for_stale_content_is_ignored(env: WorkflowEnv
         result = await handle.result()
     # The reject was about other content, so it did not end the job; the deadline did.
     assert result.final_state == JobState.CANCELLED.value and result.replanned
+
+
+async def test_the_planned_deadline_is_absolute_and_does_not_slide_with_slow_production(
+    env: WorkflowEnvironment,
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    h = Harness()
+    deadline = datetime.now(UTC) + timedelta(hours=1)
+    async with h.worker(env):
+        job_id = h.backend.create_job("chan-a")
+        from ytcore.workflow.models import VideoJobInput
+
+        handle = await env.client.start_workflow(
+            VideoJobWorkflow.run,
+            VideoJobInput(
+                job_id=job_id,
+                channel_id="chan-a",
+                origin="planner",
+                approval_timeout_seconds=48 * 3600,  # would be 2 days if it slid
+                approval_deadline_epoch=deadline.timestamp(),
+            ),
+            id=f"job-{job_id}",
+            task_queue=TASK_QUEUE,
+        )
+        await _await_state(handle, JobState.AWAITING_APPROVAL)
+        result = await handle.result()
+        desc = await handle.describe()
+    assert result.final_state == JobState.CANCELLED.value and result.replanned
+    assert abs((h.backend.jobs[job_id].approval_deadline - deadline).total_seconds()) < 1  # type: ignore[operator]
+    assert desc.close_time is not None and desc.start_time is not None
+    # cancelled at the planned deadline (1h), not 48h after sealing
+    assert desc.close_time - desc.start_time < timedelta(hours=3)
+
+
+async def test_a_package_that_cannot_be_approved_in_time_is_never_sealed(
+    env: WorkflowEnvironment,
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from ytcore.workflow.models import VideoJobInput
+
+    h = Harness()
+    async with h.worker(env):
+        job_id = h.backend.create_job("chan-a")
+        handle = await env.client.start_workflow(
+            VideoJobWorkflow.run,
+            VideoJobInput(
+                job_id=job_id,
+                channel_id="chan-a",
+                origin="planner",
+                approval_deadline_epoch=(datetime.now(UTC) - timedelta(minutes=1)).timestamp(),
+            ),
+            id=f"job-{job_id}",
+            task_queue=TASK_QUEUE,
+        )
+        result = await handle.result()
+    assert result.final_state == JobState.CANCELLED.value and result.replanned
+    assert h.backend.jobs[job_id].manifest is None  # never submitted for approval
+    assert h.client.uploads == []

@@ -255,4 +255,4 @@ def test_release_requires_a_reason(store: PostgresStore) -> None:
     with pytest.raises(ValueError):
         reconcile.release_upload(store, "x", "short", operator="ada")
     with pytest.raises(ValueError):
-        reconcile.adopt_upload(store, "x", " ", operator="ada")
+        reconcile.adopt_upload(store, "x", "../etc", operator="ada")

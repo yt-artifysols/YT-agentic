@@ -160,6 +160,20 @@ SELECT pg_temp.expect_error(
       VALUES ('vid1', '2026-W19', 'pl-a', 'below')$$, '23505',
     'at most one learning per video per week');
 
+-- ---------------------------------------------------------------- late approvals
+INSERT INTO video_jobs (id, channel_id, origin, approval_deadline)
+VALUES ('00000000-0000-0000-0000-0000000000c1', 'pl-a', 'planner', now() - interval '1 minute');
+SELECT pg_temp.expect_error(
+    $$INSERT INTO approvals (job_id, channel_id, content_hash, token_jti, approver, expires_at)
+      VALUES ('00000000-0000-0000-0000-0000000000c1', 'pl-a', 'sha256:' || repeat('a', 64),
+              'late-jti', 'owner@example.test', now() + interval '1 hour')$$,
+    'YTD01', 'no approval is recorded after the approval deadline');
+SELECT pg_temp.expect_error(
+    $$UPDATE daily_plans SET status = 'active' WHERE status = 'replanned'$$, '42501',
+    'a replaced plan stays replaced');
+SELECT pg_temp.expect_error($$TRUNCATE video_metrics$$, '42501', 'metrics cannot be truncated');
+SELECT pg_temp.expect_error($$DELETE FROM performance_notes$$, '42501', 'learnings are kept');
+
 SELECT pg_temp.check(audit_chain_first_break() IS NULL, 'audit chain still verifies');
 
 ROLLBACK;
