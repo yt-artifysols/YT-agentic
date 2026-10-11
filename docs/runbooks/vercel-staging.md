@@ -27,7 +27,9 @@ Only the hub project can sign or record an approval; the jobs project cannot (da
    (or `ytctl ops grant-role --role yt_hub --login hub_login`). Build each service URL from the
    owner URL with that login, and use the **pooled** host for the services.
 
-## 2. Approval key (once)
+## 2. Approval key and cron secret (once)
+`bash deploy/vercel/gen_secrets.sh` writes `.secrets-staging/` (key pair + `cron_secret`); paste into the
+dashboards as Sensitive variables, then `shred -u` it. Or by hand:
 ```bash
 openssl genpkey -algorithm ed25519 -out approval.pem
 openssl pkey -in approval.pem -pubout -out approval.pub
