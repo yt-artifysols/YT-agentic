@@ -19,6 +19,8 @@ export function TopBar() {
       <span className="brand">Approval hub</span>
       <nav>
         <Link href="/">Queue</Link>
+        {me && <Link href="/clusters">Clusters</Link>}
+        {me && <Link href="/scorecards">Scorecards</Link>}
         {me && me.role !== "approver" && <Link href="/controls">Kill switches</Link>}
       </nav>
       {me && (

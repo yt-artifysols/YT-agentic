@@ -148,3 +148,50 @@ def test_config_cannot_switch_a_dark_cluster_live(db: str) -> None:
     from ytcore.store.postgres import map_db_error
 
     assert isinstance(map_db_error(exc.value), RolloutRefused)
+
+
+def test_onboarding_checklist_applies_one_channel_and_never_prints_secret_values(
+    db: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from ytcore.channels import onboard as ob
+    from ytcore.secrets.provider import InMemorySecretsProvider
+
+    fleet = load_fleet(CONFIG_ROOT / "examples")
+    secrets = InMemorySecretsProvider(
+        {"vault://youtube-refresh-token-diy-weekly": "rt-" + "z" * 12}
+    )
+    report, items = ob.onboard(_connect(db), fleet, "diy-weekly", secrets)
+    text = ob.render(items)
+    assert "rt-" + "z" * 12 not in text
+    # only this channel and the clusters it needs were applied
+    assert set(report.channels) == {"diy-weekly"}
+    assert _sql(db, "SELECT id FROM channels") == [("diy-weekly",)]
+    by_title = {i.title: i for i in items}
+    assert by_title["YouTube upload token stored"].status == "done"
+    assert by_title["YouTube analytics token stored"].status == "todo"
+    assert by_title["Brand and policy approved by a human"].status == "todo"
+    assert by_title["Cluster cluster-b is live"].status == "blocked"
+    steps = "\n".join(ob.oauth_instructions(fleet.channels["diy-weekly"]))
+    assert "youtube-refresh-token-diy-weekly" in steps and "channel owner" in steps
+    # the prerequisite cluster was created too (so the rollout rule can be enforced)
+    assert {r[0] for r in _sql(db, "SELECT id FROM clusters")} == {"cluster-a", "cluster-b"}
+
+
+def test_cli_validate_and_list_work_without_a_database(capsys: pytest.CaptureFixture[str]) -> None:
+    from ytcore import cli
+
+    assert cli.main(["channel", "validate", "--config-dir", str(CONFIG_ROOT / "examples")]) == 0
+    assert "2 channel(s)" in capsys.readouterr().out
+    assert cli.main(["channel", "list", "--config-dir", str(CONFIG_ROOT / "examples")]) == 0
+    assert "finance-daily" in capsys.readouterr().out
+
+
+def test_cli_rejects_an_invalid_fleet(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from ytcore import cli
+
+    bad = tmp_path / "cfg"
+    shutil.copytree(CONFIG_ROOT / "examples", bad)
+    (bad / "channels" / "diy-weekly.yaml").unlink()
+    (bad / "channels" / "oops.yaml").write_text("slug: oops\ndisplay_name: x\ncluster: ghost\n")
+    assert cli.main(["channel", "validate", "--config-dir", str(bad)]) == 1
+    assert "unknown cluster" in capsys.readouterr().err

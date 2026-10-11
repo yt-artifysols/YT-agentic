@@ -7,6 +7,9 @@
     ytctl knowledge show --channel CHAN
     ytctl knowledge propose --channel CHAN --kind banned_claims --file claims.md [--base-version N]
 
+    ytctl channel validate | list | apply [--dry-run]
+    ytctl channel onboard SLUG [--dry-run-jobs 3]   (apply, checklist, OAuth steps, shadow dry run)
+    ytctl rollout status | gate CLUSTER             (sign-off and enabling happen in the hub)
     ytctl ops stuck | pending-uploads | plans
     ytctl ops adopt-upload --upload ID --video-id VIDEO      (after checking YouTube Studio)
     ytctl ops release-upload --upload ID --reason "no video exists on YouTube, checked ..."
@@ -70,6 +73,26 @@ def _parser() -> argparse.ArgumentParser:
     prop.add_argument("--file", type=Path, required=True)
     prop.add_argument("--base-version", type=int)
 
+    chan = sub.add_parser("channel", help="fleet configuration").add_subparsers(
+        dest="cmd", required=True
+    )
+    for name in ("validate", "apply", "onboard", "list"):
+        sp = chan.add_parser(name)
+        sp.add_argument("--config-dir", type=Path)
+        if name == "apply":
+            sp.add_argument("--dry-run", action="store_true")
+        if name == "onboard":
+            sp.add_argument("slug")
+            sp.add_argument("--dry-run", action="store_true")
+            sp.add_argument("--dry-run-jobs", type=int, default=0, help="shadow jobs to run")
+
+    roll = sub.add_parser("rollout", help="cluster rollout").add_subparsers(
+        dest="cmd", required=True
+    )
+    roll.add_parser("status")
+    gate = roll.add_parser("gate")
+    gate.add_argument("cluster")
+
     ops = sub.add_parser("ops", help="operations (see docs/runbooks)").add_subparsers(
         dest="cmd", required=True
     )
@@ -84,6 +107,74 @@ def _parser() -> argparse.ArgumentParser:
     plans = ops.add_parser("plans", help="upcoming daily plans")
     plans.add_argument("--limit", type=int, default=30)
     return parser
+
+
+def _channel(args: argparse.Namespace) -> int:
+    import psycopg
+
+    from ytcore.channels import onboard as ob
+    from ytcore.channels.apply import apply_fleet
+    from ytcore.channels.config import ConfigError, load_fleet
+
+    try:
+        fleet = load_fleet(args.config_dir)
+    except (ConfigError, ValueError) as exc:
+        print(f"invalid configuration: {exc}", file=sys.stderr)
+        return 1
+    if args.cmd == "validate":
+        print(f"ok: {len(fleet.clusters)} cluster(s), {len(fleet.channels)} channel(s)")
+        return 0
+    if args.cmd == "list":
+        for slug, ch in sorted(fleet.channels.items()):
+            print(f"{slug:<28} {ch.cluster:<16} {ch.autonomy_tier:<7} {ch.audience_timezone}")
+        return 0
+    dsn = _conninfo()
+
+    def connect() -> psycopg.Connection[Any]:
+        return psycopg.connect(dsn, autocommit=True)
+
+    if args.cmd == "apply":
+        report = apply_fleet(connect, fleet, dry_run=args.dry_run)
+        print(json.dumps({"clusters": report.clusters, "channels": report.channels,
+                          "projects": report.projects, "drafts": report.drafts,
+                          "dry_run": report.dry_run}, indent=2))  # fmt: skip
+        return 0
+    from ytcore.config import build_secrets_provider, load_settings
+
+    if args.slug not in fleet.channels:
+        print(f"error: no config for channel {args.slug!r}", file=sys.stderr)
+        return 1
+    secrets = build_secrets_provider(load_settings())
+    report, items = ob.onboard(connect, fleet, args.slug, secrets, dry_run=args.dry_run)
+    print(ob.render(items))
+    print("\nOAuth linking (a person must do these steps):")
+    print("\n".join("  " + line for line in ob.oauth_instructions(fleet.channels[args.slug])))
+    if args.dry_run_jobs > 0 and not args.dry_run:
+        from ytcore.agents import shadow
+
+        print(f"\nRunning {args.dry_run_jobs} shadow job(s); nothing can publish ...")
+        return int(shadow.main(["--channel", args.slug, "--count", str(args.dry_run_jobs)]))
+    return 0 if all(i.status != "blocked" for i in items) else 2
+
+
+def _rollout(args: argparse.Namespace) -> int:
+    import psycopg
+
+    from ytcore.channels.rollout import RolloutService
+
+    dsn = _conninfo()
+    svc = RolloutService(lambda: psycopg.connect(dsn, autocommit=True))
+    if args.cmd == "status":
+        for c in svc.clusters():
+            state = "live" if c["live_enabled"] else f"dark (needs {c['requires_cluster']})"
+            print(
+                f"{c['id']:<20} {state:<28} channels {c['channels']:<3} "
+                f"waiting {c['awaiting_approval']}"
+            )
+        return 0
+    report = svc.gate(args.cluster)
+    print(json.dumps(report.to_json(), indent=2, default=str))
+    return 0 if report.ok else 1
 
 
 def _ops(args: argparse.Namespace, who: str) -> int:
@@ -167,6 +258,10 @@ def main(
 
         if args.area == "ops":
             return _ops(args, who)
+        if args.area == "channel":
+            return _channel(args)
+        if args.area == "rollout":
+            return _rollout(args)
 
         base = knowledge or PostgresKnowledge.from_conninfo(_conninfo())
         chan = base.channel(args.channel)

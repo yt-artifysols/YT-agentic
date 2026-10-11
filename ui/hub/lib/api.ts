@@ -57,6 +57,56 @@ export interface Controls {
   channels: { id: string; name: string; cluster_id: string | null; status: string; tier: string }[];
 }
 
+export interface ClusterRow {
+  id: string;
+  display_name: string;
+  niche: string;
+  status: string;
+  live_enabled: boolean;
+  live_since: string | null;
+  requires_cluster: string | null;
+  gate_days: number;
+  max_concurrent_jobs: number;
+  channels: number;
+  awaiting_approval: number;
+  oldest_waiting_since: string | null;
+  health: Record<string, unknown> | null;
+}
+
+export interface Scorecard {
+  channel_id: string;
+  cluster_id: string | null;
+  score_date: string;
+  jobs_planned: number;
+  jobs_approved: number;
+  jobs_rejected: number;
+  approval_rate: number | null;
+  policy_flags: number;
+  videos_published: number;
+  cost_cents: number;
+  cost_per_video: number | null;
+  avg_ctr: number | null;
+  avg_retention: number | null;
+  views: number;
+  revenue_cents: number | null;
+}
+
+export interface Gate {
+  cluster_id: string;
+  live: boolean;
+  live_days: number;
+  required_days: number;
+  breaker_trips: number;
+  stuck_or_plan_alerts: number;
+  failed_uploads: number;
+  pending_uploads: number;
+  decisions: number;
+  rejection_rate: number | null;
+  scorecard_days: number;
+  problems: string[];
+  ok: boolean;
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -131,6 +181,17 @@ export const api = {
     request<{ ok: boolean }>("POST", `/api/jobs/${encodeURIComponent(id)}/reject`, body),
   batchApprove: (items: { job_id: string; content_hash: string }[]) =>
     request<{ results: { job_id: string; ok: boolean; error?: string | null }[] }>("POST", "/api/jobs/batch-approve", { items }),
+
+  clusters: () => request<ClusterRow[]>("GET", "/api/clusters"),
+  scorecards: (q: Record<string, string>) => {
+    const params = new URLSearchParams(Object.entries(q).filter(([, v]) => v !== ""));
+    return request<Scorecard[]>("GET", `/api/scorecards${params.size ? `?${params}` : ""}`);
+  },
+  gate: (cluster: string) => request<Gate>("GET", `/api/rollout/${encodeURIComponent(cluster)}/gate`),
+  signoff: (cluster: string, note: string) =>
+    request<{ id: number }>("POST", `/api/rollout/${encodeURIComponent(cluster)}/signoff`, { note }),
+  enableCluster: (cluster: string) =>
+    request<{ ok: boolean }>("POST", `/api/rollout/${encodeURIComponent(cluster)}/enable`, {}),
 
   controls: () => request<Controls>("GET", "/api/controls"),
   setGlobal: (paused: boolean, reason: string) => request<{ ok: boolean }>("POST", "/api/controls/global", { paused, reason }),

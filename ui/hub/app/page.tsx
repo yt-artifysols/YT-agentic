@@ -7,7 +7,7 @@ import { api, type QueueItem } from "@/lib/api";
 import { useMe } from "@/lib/useMe";
 import { RiskBadge } from "./RiskBadge";
 
-const EMPTY = { cluster: "", channel: "", min_risk: "", max_risk: "", fast_lane: "" };
+const EMPTY = { cluster: "", channel: "", min_risk: "", max_risk: "", fast_lane: "", sort: "risk" };
 
 export default function QueuePage() {
   const me = useMe();
@@ -79,6 +79,14 @@ export default function QueuePage() {
           <select value={filters.fast_lane} onChange={set("fast_lane")}>
             <option value="">All</option>
             <option value="true">Fast lane only</option>
+          </select>
+        </label>
+        <label>Sort
+          <select value={filters.sort} onChange={set("sort")}>
+            <option value="risk">Highest risk first</option>
+            <option value="deadline">Nearest deadline</option>
+            <option value="channel">Channel</option>
+            <option value="cluster">Cluster</option>
           </select>
         </label>
         <button onClick={load}>Refresh</button>

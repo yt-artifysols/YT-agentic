@@ -271,3 +271,29 @@ def load_fleet(root: Path | None = None, *, max_channels: int = MAX_CHANNELS) ->
     fleet = FleetCfg(clusters=clusters, channels=channels)
     validate_fleet(fleet, max_channels=max_channels)
     return fleet
+
+
+def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(prog="python -m ytcore.channels.config")
+    parser.add_argument("cmd", choices=["validate", "tfvars"])
+    parser.add_argument("--dir", type=Path, default=CONFIG_ROOT)
+    args = parser.parse_args(argv)
+    try:
+        fleet = load_fleet(args.dir)
+    except (ConfigError, ValueError) as exc:
+        print(f"invalid: {exc}", file=sys.stderr)
+        return 1
+    if args.cmd == "tfvars":
+        print(json.dumps({"channel_ids": sorted(fleet.channels)}))
+    else:
+        print(f"ok: {len(fleet.clusters)} cluster(s), {len(fleet.channels)} channel(s)")
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    import sys
+
+    sys.exit(main())
